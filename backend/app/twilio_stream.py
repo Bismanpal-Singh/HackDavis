@@ -32,7 +32,9 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
         wss_url = resolve_media_stream_wss_url(request)
         logger.info("TWILIO_TWIML_STREAM_URL url=%s", wss_url)
         vr = VoiceResponse()
-        stream = vr.start().stream(url=wss_url, track="inbound_track")
+        # <Connect><Stream> keeps the call leg open until the Media Stream ends.
+        # <Start><Stream> is non-blocking; an empty Response after it often hangs up immediately.
+        stream = vr.connect().stream(url=wss_url, track="inbound_track")
         stream.parameter(name="caller", value="twilio")
         return str(vr)
 
