@@ -6,6 +6,8 @@ import asyncio
 import base64
 import json
 import logging
+from urllib.parse import parse_qs
+
 from deepgram import DeepgramClient
 from deepgram.clients.listen.enums import LiveTranscriptionEvents
 from deepgram.clients.listen.v1.websocket.options import LiveOptions
@@ -25,22 +27,99 @@ from app.session_store import session_store
 logger = logging.getLogger("scamshield")
 
 
+def _twilio_custom_params_to_dict(raw: object) -> dict[str, str]:
+    """Normalize Twilio Media Stream ``customParameters`` (dict or list of name/value)."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return {str(k): "" if v is None else str(v) for k, v in raw.items()}
+    if isinstance(raw, list):
+        out: dict[str, str] = {}
+        for item in raw:
+            if isinstance(item, dict) and item.get("name") is not None:
+                out[str(item["name"])] = str(item.get("value") or "")
+        return out
+    return {}
+
+
+def _first_qs_value(qs: dict[str, list[str]], *keys: str) -> str:
+    for key in keys:
+        for variant in (key, key.lower(), key.upper()):
+            vals = qs.get(variant)
+            if vals and vals[0]:
+                return vals[0].strip()
+    return ""
+
+
+def _fetch_call_phones_rest(call_sid: str) -> tuple[str | None, str | None]:
+    """Load caller / dialed numbers from Twilio Calls API (works even if Stream params are empty)."""
+    if not settings.TWILIO_CONFIGURED or not call_sid:
+        return None, None
+    try:
+        from twilio.rest import Client
+
+        client = Client(
+            settings.TWILIO_API_KEY_SID,
+            settings.TWILIO_API_KEY_SECRET,
+            account_sid=settings.TWILIO_ACCOUNT_SID,
+        )
+        call = client.calls(call_sid).fetch()
+        from_raw = getattr(call, "from_", None)
+        to_raw = getattr(call, "to", None)
+        from_s = (str(from_raw or "")).strip() or None
+        to_s = (str(to_raw or "")).strip() or None
+        return from_s, to_s
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("TWILIO_CALL_FETCH_FAILED call_sid=%s err=%s", call_sid, exc)
+        return None, None
+
+
 def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngine) -> APIRouter:
     router = APIRouter(tags=["twilio"])
 
-    def _twiml_voice_response(request: Request) -> str:
+    async def _twiml_voice_response(request: Request) -> str:
         wss_url = resolve_media_stream_wss_url(request)
         logger.info("TWILIO_TWIML_STREAM_URL url=%s", wss_url)
+        caller_phone = ""
+        dialed_phone = ""
+        if request.method == "POST":
+            body = await request.body()
+            if body:
+                qs = parse_qs(body.decode(errors="replace"), keep_blank_values=False)
+                caller_phone = _first_qs_value(qs, "From", "Caller")
+                dialed_phone = _first_qs_value(qs, "To", "Called")
+        if not caller_phone:
+            caller_phone = (
+                request.query_params.get("From")
+                or request.query_params.get("Caller")
+                or ""
+            ).strip()
+        if not dialed_phone:
+            dialed_phone = (
+                request.query_params.get("To")
+                or request.query_params.get("Called")
+                or ""
+            ).strip()
+        logger.info(
+            "TWILIO_VOICE_WEBHOOK has_caller=%s has_dialed=%s",
+            bool(caller_phone),
+            bool(dialed_phone),
+        )
+
         vr = VoiceResponse()
-        stream = vr.start().stream(url=wss_url, track="inbound_track")
-        stream.parameter(name="caller", value="twilio")
+        # <Connect><Stream> keeps the call leg open until the Media Stream ends.
+        # <Start><Stream> is non-blocking; an empty Response after it often hangs up immediately.
+        stream = vr.connect().stream(url=wss_url, track="inbound_track")
+        # Passed through to Media Stream "start" customParameters for Mongo/reporting.
+        stream.parameter(name="caller_phone", value=caller_phone or "")
+        stream.parameter(name="dialed_phone", value=dialed_phone or "")
         return str(vr)
 
     @router.post("/twilio/voice")
     async def twilio_voice_post(request: Request) -> Response:
         if not settings.TWILIO_CONFIGURED:
             raise HTTPException(status_code=503, detail="Twilio credentials not configured.")
-        body = _twiml_voice_response(request)
+        body = await _twiml_voice_response(request)
         return Response(content=body, media_type="text/xml")
 
     @router.get("/twilio/voice")
@@ -48,7 +127,7 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
         """Allow Console validation / redirects that use GET."""
         if not settings.TWILIO_CONFIGURED:
             raise HTTPException(status_code=503, detail="Twilio credentials not configured.")
-        body = _twiml_voice_response(request)
+        body = await _twiml_voice_response(request)
         return Response(content=body, media_type="text/xml")
 
     @router.websocket("/twilio/media")
@@ -113,10 +192,41 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
                     if not call_sid:
                         logger.error("TWILIO_MEDIA_START_MISSING_CALL_SID")
                         break
+                    params = _twilio_custom_params_to_dict(start.get("customParameters"))
+                    caller_from_stream = (
+                        params.get("caller_phone", "").strip()
+                        or params.get("From", "").strip()
+                    )
+                    dialed_from_stream = (
+                        params.get("dialed_phone", "").strip()
+                        or params.get("To", "").strip()
+                    )
+
+                    if (not caller_from_stream or not dialed_from_stream) and settings.TWILIO_CONFIGURED:
+                        api_from, api_to = await asyncio.to_thread(_fetch_call_phones_rest, call_sid)
+                        if not caller_from_stream and api_from:
+                            caller_from_stream = api_from
+                        if not dialed_from_stream and api_to:
+                            dialed_from_stream = api_to
+                        if api_from or api_to:
+                            logger.info("TWILIO_MEDIA_PHONES_FROM_API call_sid=%s", call_sid)
+
                     session, created = session_store.get_or_create_by_id(call_sid)
+                    if caller_from_stream:
+                        session.caller_phone = caller_from_stream
+                    if dialed_from_stream:
+                        session.dialed_phone = dialed_from_stream
                     if created:
                         mongo_store.create_session(session)
-                    logger.info("TWILIO_MEDIA_START call_sid=%s session_id=%s", call_sid, session.session_id)
+                    elif caller_from_stream or dialed_from_stream:
+                        mongo_store.update_session(session)
+                    logger.info(
+                        "TWILIO_MEDIA_START call_sid=%s session_id=%s caller_set=%s dialed_set=%s",
+                        call_sid,
+                        session.session_id,
+                        bool(session.caller_phone),
+                        bool(session.dialed_phone),
+                    )
 
                     opts = LiveOptions(
                         model="nova-2",

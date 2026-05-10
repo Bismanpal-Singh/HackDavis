@@ -63,6 +63,8 @@ class Settings:
     MONGODB_URI: str = os.environ.get("MONGODB_URI", "")
     MONGODB_DB: str = os.environ.get("MONGODB_DB", "scamshield")
     MONGODB_COLLECTION: str = os.environ.get("MONGODB_COLLECTION", "call_sessions")
+    MONGODB_USERS_COLLECTION: str = os.environ.get("MONGODB_USERS_COLLECTION", "users")
+    ALLOWED_ORIGINS: str = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5174")
 
     TWILIO_ACCOUNT_SID: str = os.environ.get("TWILIO_ACCOUNT_SID", "")
     TWILIO_API_KEY_SID: str = os.environ.get("TWILIO_API_KEY_SID", "")

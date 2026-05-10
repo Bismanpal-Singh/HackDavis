@@ -7,7 +7,12 @@ function fmt(ts) {
   return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 function fmtDuration(s) {
+  if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+function getDuration(entries) {
+  if (!entries?.length) return 0
+  return Math.round(entries[entries.length - 1].timestamp - entries[0].timestamp)
 }
 
 const FILTERS = ['All', 'Scam', 'Safe']
@@ -18,7 +23,8 @@ export default function CallHistory({ calls, onSelectCall }) {
 
   const visible = calls.filter(c => {
     const matchFilter = filter === 'All' || (filter === 'Scam' ? c.is_scam : !c.is_scam)
-    const matchQuery  = query === '' || c.phone_number.includes(query) || (c.scam_type || '').toLowerCase().includes(query.toLowerCase())
+    const scamType = c.latest_claude_result?.scam_type || ''
+    const matchQuery  = query === '' || (c.phone_number || '').includes(query) || scamType.toLowerCase().includes(query.toLowerCase())
     return matchFilter && matchQuery
   })
 
@@ -84,13 +90,15 @@ export default function CallHistory({ calls, onSelectCall }) {
               className="w-full grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 items-center px-5 py-4 border-b border-stone-50 hover:bg-sage-50/50 transition-colors text-left last:border-0"
             >
               <div>
-                <p className="text-sm font-semibold text-stone-800">{call.phone_number}</p>
-                {call.scam_type && <p className="text-xs text-stone-400 mt-0.5">{call.scam_type}</p>}
+                <p className="text-sm font-semibold text-stone-800">{call.caller_phone || 'Unknown'}</p>
+                {call.latest_claude_result?.scam_type && (
+                  <p className="text-xs text-stone-400 mt-0.5">{call.latest_claude_result.scam_type}</p>
+                )}
               </div>
-              <span className="text-xs text-stone-500 whitespace-nowrap">{fmt(call.timestamp)}</span>
-              <span className="text-xs text-stone-500 whitespace-nowrap">{fmtDuration(call.duration)}</span>
-              <span className="text-sm font-bold text-stone-700">{call.risk_score}</span>
-              <RiskBadge score={call.risk_score} />
+              <span className="text-xs text-stone-500 whitespace-nowrap">{fmt(call.created_at)}</span>
+              <span className="text-xs text-stone-500 whitespace-nowrap">{fmtDuration(getDuration(call.transcript_entries))}</span>
+              <span className="text-sm font-bold text-stone-700">{call.max_score}</span>
+              <RiskBadge score={call.max_score} />
             </motion.button>
           ))
         )}

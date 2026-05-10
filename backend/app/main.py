@@ -1,7 +1,8 @@
 import json
 import logging
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from app.config import settings
@@ -12,7 +13,7 @@ logger = logging.getLogger("scamshield")
 
 from app.decision_engine import DecisionEngine, get_risk_level
 from app.detection_pipeline import process_transcript_chunk
-from app.models import ErrorResponse, TranscriptChunk
+from app.models import ErrorResponse, TranscriptChunk, UserRegisterRequest
 from app.mongo_store import mongo_store
 from app.report_builder import build_report, build_report_from_document
 from app.rule_scorer import RuleScorer
@@ -21,6 +22,15 @@ from app.twilio_stream import create_twilio_router
 
 
 app = FastAPI(title=settings.APP_NAME)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 rule_scorer = RuleScorer()
 decision_engine = DecisionEngine()
 
@@ -40,11 +50,34 @@ async def health() -> dict:
     }
 
 
+@app.post("/api/register")
+async def register_user(body: UserRegisterRequest) -> dict:
+    """Called once by the Android app after Google login to link google_sub → dialed_phone."""
+    if not mongo_store.is_enabled():
+        raise HTTPException(status_code=503, detail="Database not available.")
+    mongo_store.register_user(body.google_sub, body.dialed_phone)
+    return {"success": True}
+
+
+@app.get("/api/calls")
+async def get_calls(google_sub: str = Query(..., description="Google OAuth subject ID")) -> list[dict]:
+    """Returns all ended call sessions for the user identified by their Google sub."""
+    if not mongo_store.is_enabled():
+        raise HTTPException(status_code=503, detail="Database not available.")
+    user = mongo_store.get_user_by_sub(google_sub)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not registered. Complete setup on the mobile app first.")
+    calls = mongo_store.get_calls_by_dialed_phone(user["dialed_phone"])
+    return calls
+
+
 @app.get("/debug/sessions")
 async def debug_sessions() -> list[dict]:
     memory_summaries = [
         {
             "session_id": session.session_id,
+            "caller_phone": session.caller_phone,
+            "dialed_phone": session.dialed_phone,
             "created_at": session.created_at.isoformat(),
             "current_score": session.current_score,
             "risk_level": get_risk_level(session.current_score),

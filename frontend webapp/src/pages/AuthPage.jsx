@@ -62,9 +62,21 @@ export default function AuthPage() {
 
   const isSignup = mode === 'signup'
 
-  const handleGoogleSuccess = (tokenResponse) => {
-    console.log('Google token:', tokenResponse)
-    // TODO: send tokenResponse.access_token to backend for verification
+  const handleGoogleSuccess = async (tokenResponse) => {
+    try {
+      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+      })
+      const profile = await res.json()
+      localStorage.setItem('scamshield_user', JSON.stringify({
+        sub:     profile.sub,
+        email:   profile.email,
+        name:    profile.name,
+        picture: profile.picture,
+      }))
+    } catch (err) {
+      console.error('Failed to fetch Google profile:', err)
+    }
     navigate('/dashboard')
   }
 

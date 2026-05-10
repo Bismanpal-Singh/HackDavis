@@ -6,7 +6,12 @@ function fmt(ts) {
   return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 function fmtDuration(s) {
+  if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+function getDuration(entries) {
+  if (!entries?.length) return 0
+  return Math.round(entries[entries.length - 1].timestamp - entries[0].timestamp)
 }
 
 // Tiny sparkline SVG
@@ -81,7 +86,7 @@ export default function Overview({ calls, onSelectCall }) {
               {/* Sparkline */}
               <div className="hidden sm:block shrink-0">
                 <Sparkline
-                  data={call.risk_timeline}
+                  data={call.score_history?.map(s => s.score) ?? []}
                   color={call.is_scam ? '#ef4444' : '#4e844a'}
                 />
               </div>
@@ -89,18 +94,18 @@ export default function Overview({ calls, onSelectCall }) {
               {/* Info */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-semibold text-stone-800">{call.phone_number}</span>
-                  {call.scam_type && (
-                    <span className="text-xs text-stone-400 font-medium">· {call.scam_type}</span>
+                  <span className="text-sm font-semibold text-stone-800">{call.caller_phone || 'Unknown'}</span>
+                  {call.latest_claude_result?.scam_type && (
+                    <span className="text-xs text-stone-400 font-medium">· {call.latest_claude_result.scam_type}</span>
                   )}
                 </div>
-                <p className="text-xs text-stone-400">{fmt(call.timestamp)} · {fmtDuration(call.duration)}</p>
+                <p className="text-xs text-stone-400">{fmt(call.created_at)} · {fmtDuration(getDuration(call.transcript_entries))}</p>
               </div>
 
               {/* Score + badge */}
               <div className="flex items-center gap-3 shrink-0">
-                <span className="text-lg font-extrabold text-stone-800">{call.risk_score}</span>
-                <RiskBadge score={call.risk_score} />
+                <span className="text-lg font-extrabold text-stone-800">{call.max_score}</span>
+                <RiskBadge score={call.max_score} />
               </div>
             </motion.button>
           ))}

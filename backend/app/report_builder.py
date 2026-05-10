@@ -8,6 +8,8 @@ def build_report(session: SessionState) -> dict:
 
     return {
         "session_id": session.session_id,
+        "caller_phone": session.caller_phone,
+        "dialed_phone": session.dialed_phone,
         "final_score": session.current_score,
         "max_score": max(scores, default=session.current_score),
         "alert_triggered": session.alert_triggered,
@@ -35,6 +37,8 @@ def build_report(session: SessionState) -> dict:
 def build_report_from_document(document: dict) -> dict:
     return {
         "session_id": document["session_id"],
+        "caller_phone": document.get("caller_phone"),
+        "dialed_phone": document.get("dialed_phone"),
         "final_score": document.get("current_score", 0),
         "max_score": document.get("max_score", document.get("current_score", 0)),
         "alert_triggered": document.get("alert_triggered", False),

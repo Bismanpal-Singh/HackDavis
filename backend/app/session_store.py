@@ -12,6 +12,8 @@ class TranscriptEntry:
 @dataclass
 class SessionState:
     session_id: str
+    caller_phone: str | None = None
+    dialed_phone: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "active"
