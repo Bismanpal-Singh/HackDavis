@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, Play, Volume2, XCircle } from 'lucide-react'
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
@@ -118,12 +118,15 @@ export default function Academy() {
 
   const [loadingScenarios, setLoadingScenarios] = useState(true)
   const [loadingScenarioDetail, setLoadingScenarioDetail] = useState(false)
+  const [loadingStats, setLoadingStats] = useState(false)
   const [submittingAttempt, setSubmittingAttempt] = useState(false)
-  const [generatingAudio, setGeneratingAudio] = useState(false)
+  const [generatingScenarioAudio, setGeneratingScenarioAudio] = useState(false)
+  const [generatingFeedbackAudio, setGeneratingFeedbackAudio] = useState(false)
   const [error, setError] = useState('')
   const [voiceMessage, setVoiceMessage] = useState('')
 
   const redFlags = useMemo(() => scenarioDetail?.red_flags || [], [scenarioDetail])
+  const englishOnly = useMemo(() => isEnglishOnlyScenario(scenarioDetail), [scenarioDetail])
   const decoys = useMemo(
     () => buildDecoys(scenarioDetail?.transcript || [], redFlags),
     [scenarioDetail, redFlags]
@@ -134,20 +137,45 @@ export default function Academy() {
     return [...realFlags, ...extraFlags]
   }, [redFlags, decoys])
 
+  const resetAttemptState = useCallback(() => {
+    setAnswerLabel('')
+    setSelectedFlags([])
+    setAttemptResult(null)
+    setVoiceMessage('')
+    setGeneratingScenarioAudio(false)
+    setGeneratingFeedbackAudio(false)
+    setSubmittingAttempt(false)
+  }, [])
+
+  const fetchStats = useCallback(async () => {
+    setLoadingStats(true)
+    try {
+      const response = await fetch(`${BACKEND}/academy/stats?user_id=anonymous`)
+      if (!response.ok) throw new Error('Unable to load Academy stats.')
+      setStats(await response.json())
+    } catch (err) {
+      setError(err.message || 'Unable to load Academy stats.')
+    } finally {
+      setLoadingStats(false)
+    }
+  }, [])
+
   useEffect(() => {
-    let mounted = true
+    const controller = new AbortController()
+    setLoadingScenarios(true)
+    setError('')
+
     Promise.all([
-      fetch(`${BACKEND}/academy/scenarios`).then((r) => {
+      fetch(`${BACKEND}/academy/scenarios`, { signal: controller.signal }).then((r) => {
         if (!r.ok) throw new Error('Unable to load scenarios.')
         return r.json()
       }),
-      fetch(`${BACKEND}/academy/stats?user_id=anonymous`).then((r) => {
-        if (!r.ok) throw new Error('Unable to load stats.')
+      fetch(`${BACKEND}/academy/stats?user_id=anonymous`, { signal: controller.signal }).then((r) => {
+        if (!r.ok) throw new Error('Unable to load Academy stats.')
         return r.json()
       }),
     ])
       .then(([scenarioData, statsData]) => {
-        if (!mounted) return
         setScenarios(scenarioData)
         setStats(statsData)
         if (scenarioData.length > 0) {
@@ -155,31 +183,43 @@ export default function Academy() {
           setSelectedScenarioId(scenarioData[0].scenario_id)
         }
       })
-      .catch((err) => mounted && setError(err.message || 'Unable to load Academy.'))
-      .finally(() => mounted && setLoadingScenarios(false))
+      .catch((err) => {
+        if (err.name === 'AbortError') return
+        setError(err.message || 'Unable to load Academy.')
+      })
+      .finally(() => setLoadingScenarios(false))
+
     return () => {
-      mounted = false
+      controller.abort()
     }
   }, [])
 
   useEffect(() => {
     if (!selectedScenarioId) return
-    let mounted = true
+    const controller = new AbortController()
+    setLoadingScenarioDetail(true)
 
-    fetch(`${BACKEND}/academy/scenarios/${selectedScenarioId}?language=${encodeURIComponent(language)}`)
+    fetch(`${BACKEND}/academy/scenarios/${selectedScenarioId}?language=${encodeURIComponent(language)}`, {
+      signal: controller.signal,
+    })
       .then((r) => {
         if (!r.ok) throw new Error('Unable to load this scenario.')
         return r.json()
       })
       .then((data) => {
-        if (!mounted) return
         setScenarioDetail(data)
+        if (data?.language && data.language !== language) {
+          setLanguage(data.language)
+        }
       })
-      .catch((err) => mounted && setError(err.message || 'Scenario load failed.'))
-      .finally(() => mounted && setLoadingScenarioDetail(false))
+      .catch((err) => {
+        if (err.name === 'AbortError') return
+        setError(err.message || 'Unable to load this scenario.')
+      })
+      .finally(() => setLoadingScenarioDetail(false))
 
     return () => {
-      mounted = false
+      controller.abort()
     }
   }, [selectedScenarioId, language])
 
@@ -188,27 +228,30 @@ export default function Academy() {
   }
 
   const selectScenario = (scenarioId) => {
+    console.info('ACADEMY_SCENARIO_SELECTED', { scenarioId })
     setSelectedScenarioId(scenarioId)
-    setLoadingScenarioDetail(true)
-    setVoiceMessage('')
-    setAnswerLabel('')
-    setSelectedFlags([])
-    setAttemptResult(null)
+    resetAttemptState()
+    setError('')
   }
 
   const onLanguageChange = (nextLanguage) => {
+    console.info('ACADEMY_LANGUAGE_CHANGED', { language: nextLanguage })
+    if (nextLanguage === language) return
     setLanguage(nextLanguage)
-    setLoadingScenarioDetail(true)
-    setVoiceMessage('')
-    setAnswerLabel('')
-    setSelectedFlags([])
-    setAttemptResult(null)
+    resetAttemptState()
+    setError('')
   }
 
   const submitAnswer = async () => {
     if (!scenarioDetail || !answerLabel) return
     setSubmittingAttempt(true)
     setError('')
+    console.info('ACADEMY_ATTEMPT_SUBMIT', {
+      scenarioId: scenarioDetail.scenario_id,
+      language,
+      answerLabel,
+      selectedRedFlags: selectedFlags,
+    })
     try {
       const response = await fetch(`${BACKEND}/academy/attempt`, {
         method: 'POST',
@@ -224,9 +267,7 @@ export default function Academy() {
       if (!response.ok) throw new Error('Could not submit answer.')
       const data = await response.json()
       setAttemptResult(data)
-
-      const statsResponse = await fetch(`${BACKEND}/academy/stats?user_id=anonymous`)
-      if (statsResponse.ok) setStats(await statsResponse.json())
+      await fetchStats()
     } catch (err) {
       setError(err.message || 'Submit failed.')
     } finally {
@@ -236,8 +277,14 @@ export default function Academy() {
 
   const playScenarioAudio = async () => {
     if (!scenarioDetail) return
-    setGeneratingAudio(true)
+    setGeneratingScenarioAudio(true)
     setVoiceMessage('')
+    console.info('ACADEMY_AUDIO_REQUEST', {
+      kind: 'scenario',
+      scenarioId: scenarioDetail.scenario_id,
+      language,
+      voiceMode,
+    })
     try {
       const response = await fetch(`${BACKEND}/academy/audio/scenario`, {
         method: 'POST',
@@ -256,17 +303,24 @@ export default function Academy() {
       const audioBlob = await response.blob()
       const audio = new Audio(URL.createObjectURL(audioBlob))
       void audio.play()
-    } catch {
-      setVoiceMessage('Voice trainer is unavailable. You can still read the transcript.')
+    } catch (err) {
+      setVoiceMessage(
+        err?.message || 'Voice trainer is unavailable. You can still read the transcript.'
+      )
     } finally {
-      setGeneratingAudio(false)
+      setGeneratingScenarioAudio(false)
     }
   }
 
   const playFeedbackAudio = async () => {
     if (!attemptResult) return
-    setGeneratingAudio(true)
+    setGeneratingFeedbackAudio(true)
     setVoiceMessage('')
+    console.info('ACADEMY_AUDIO_REQUEST', {
+      kind: 'feedback',
+      language,
+      score: attemptResult.score,
+    })
     try {
       const response = await fetch(`${BACKEND}/academy/audio/feedback`, {
         method: 'POST',
@@ -286,15 +340,17 @@ export default function Academy() {
       const audioBlob = await response.blob()
       const audio = new Audio(URL.createObjectURL(audioBlob))
       void audio.play()
-    } catch {
-      setVoiceMessage('Voice trainer is unavailable. You can still read the transcript.')
+    } catch (err) {
+      setVoiceMessage(
+        err?.message || 'Voice trainer is unavailable. You can still read the transcript.'
+      )
     } finally {
-      setGeneratingAudio(false)
+      setGeneratingFeedbackAudio(false)
     }
   }
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-6 md:p-8 max-w-6xl">
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold text-stone-900 tracking-tight">ScamShield Academy</h1>
         <p className="text-sm text-stone-400 mt-1">Practice spotting scam calls before they happen.</p>
@@ -304,8 +360,8 @@ export default function Academy() {
         <div className="text-sm text-stone-500">Loading scenarios...</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <StatCard label="Completed Attempts" value={stats?.total_attempts ?? 0} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <StatCard label="Completed Attempts" value={loadingStats ? '...' : stats?.total_attempts ?? 0} />
             <StatCard label="Accuracy" value={`${Math.round((stats?.accuracy || 0) * 100)}%`} />
             <StatCard label="Average Score" value={stats?.average_score ?? 0} />
             <StatCard label="Weakest Scam Type" value={stats?.weakest_scam_types?.[0] || '—'} />
@@ -344,27 +400,27 @@ export default function Academy() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-stone-100 p-4 mb-6">
+          <div className="bg-white rounded-2xl border border-stone-100 p-4 md:p-5 mb-6">
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <div>
                 <p className="text-xs text-stone-500 mb-1">Language</p>
                 <select
                   value={language}
                   onChange={(e) => onLanguageChange(e.target.value)}
-                  disabled={isEnglishOnlyScenario(scenarioDetail)}
-                  className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm"
+                  disabled={englishOnly || loadingScenarioDetail}
+                  className="w-full h-10 rounded-xl border border-stone-200 px-3 text-sm leading-tight text-stone-700 bg-white disabled:bg-stone-100 disabled:text-stone-500 truncate"
                 >
                   {LANGUAGE_OPTIONS.map((option) => (
                     <option
                       key={option.value}
                       value={option.value}
-                      disabled={isEnglishOnlyScenario(scenarioDetail) && option.value !== 'en'}
+                      disabled={englishOnly && option.value !== 'en'}
                     >
                       {option.label}
                     </option>
                   ))}
                 </select>
-                {isEnglishOnlyScenario(scenarioDetail) && (
+                {englishOnly && (
                   <p className="text-[11px] text-stone-400 mt-1">
                     This public dataset scenario is available in English only.
                   </p>
@@ -375,7 +431,8 @@ export default function Academy() {
                 <select
                   value={voiceMode}
                   onChange={(e) => setVoiceMode(e.target.value)}
-                  className="w-full rounded-xl border border-stone-200 px-3 py-2 text-sm"
+                  disabled={generatingScenarioAudio}
+                  className="w-full h-10 rounded-xl border border-stone-200 px-3 text-sm leading-tight text-stone-700 bg-white disabled:bg-stone-100 disabled:text-stone-500 truncate"
                 >
                   {VOICE_MODE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -384,20 +441,26 @@ export default function Academy() {
               </div>
               <button
                 onClick={playScenarioAudio}
-                disabled={generatingAudio || !scenarioDetail}
+                disabled={generatingScenarioAudio || loadingScenarioDetail || !scenarioDetail}
                 className="rounded-xl px-4 py-2.5 bg-sage-600 text-white text-sm font-semibold hover:bg-sage-700 disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                {generatingAudio ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
-                {generatingAudio ? 'Generating audio...' : 'Play Call'}
+                {generatingScenarioAudio ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
+                {generatingScenarioAudio ? 'Generating audio...' : 'Play Call'}
               </button>
-              <button
-                onClick={playFeedbackAudio}
-                disabled={generatingAudio || !attemptResult}
-                className="rounded-xl px-4 py-2.5 bg-stone-800 text-white text-sm font-semibold hover:bg-stone-900 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                <Volume2 size={15} />
-                Play Feedback
-              </button>
+              {attemptResult ? (
+                <button
+                  onClick={playFeedbackAudio}
+                  disabled={generatingFeedbackAudio}
+                  className="rounded-xl px-4 py-2.5 bg-stone-800 text-white text-sm font-semibold hover:bg-stone-900 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {generatingFeedbackAudio ? <Loader2 size={15} className="animate-spin" /> : <Volume2 size={15} />}
+                  {generatingFeedbackAudio ? 'Generating audio...' : 'Play Feedback'}
+                </button>
+              ) : (
+                <div className="h-10 rounded-xl border border-dashed border-stone-200 text-xs text-stone-400 flex items-center justify-center">
+                  Submit answer to enable feedback audio
+                </div>
+              )}
             </div>
             {voiceMessage && <p className="text-xs text-amber-700 mt-3">{voiceMessage}</p>}
           </div>
@@ -406,7 +469,7 @@ export default function Academy() {
             <div className="text-sm text-stone-500 mb-6">Loading scenario...</div>
           ) : scenarioDetail ? (
             <div className="grid xl:grid-cols-3 gap-5">
-              <div className="xl:col-span-2 bg-white rounded-2xl border border-stone-100 p-5">
+              <div className="xl:col-span-2 bg-white rounded-2xl border border-stone-100 p-5 md:p-6">
                 <div className="flex flex-wrap items-center gap-2 mb-4">
                   <h3 className="text-base font-bold text-stone-900 mr-2">{scenarioDetail.title}</h3>
                   <span className={`text-[11px] px-2 py-1 rounded-full font-semibold ${difficultyTone(scenarioDetail.difficulty)}`}>
@@ -425,7 +488,7 @@ export default function Academy() {
                   </p>
                 )}
 
-                <div className="space-y-2 mb-5">
+                <div className="space-y-2 mb-6 max-h-[420px] overflow-y-auto pr-1">
                   {(scenarioDetail.transcript || []).map((line, index) => {
                     const isCaller = line.toLowerCase().startsWith('caller') || line.toLowerCase().startsWith('llamador')
                     const chunks = attemptResult
@@ -451,9 +514,9 @@ export default function Academy() {
                   })}
                 </div>
 
-                <div>
+                <div className="space-y-3">
                   <p className="text-xs font-bold text-stone-700 uppercase tracking-widest mb-2">Choose Label</p>
-                  <div className="flex gap-2 mb-4">
+                  <div className="flex flex-wrap gap-2 mb-4">
                     {['scam', 'safe', 'unsure'].map((value) => (
                       <button
                         key={value}
@@ -474,7 +537,7 @@ export default function Academy() {
                     {checklistOptions.map((option) => (
                       <label
                         key={option.value}
-                        className="flex items-start gap-2 rounded-xl border border-stone-200 px-3 py-2 text-sm text-stone-700"
+                        className="flex items-start gap-2 rounded-xl border border-stone-200 px-3 py-2.5 text-sm text-stone-700"
                       >
                         <input
                           type="checkbox"
@@ -488,15 +551,15 @@ export default function Academy() {
                   </div>
                   <button
                     onClick={submitAnswer}
-                    disabled={submittingAttempt || !answerLabel}
+                    disabled={submittingAttempt || !answerLabel || loadingScenarioDetail}
                     className="rounded-xl px-4 py-2.5 bg-sage-600 text-white text-sm font-semibold hover:bg-sage-700 disabled:opacity-50"
                   >
-                    {submittingAttempt ? 'Submitting answer...' : 'Submit Answer'}
+                    {submittingAttempt ? 'Submitting...' : 'Submit Answer'}
                   </button>
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-stone-100 p-5">
+              <div className="bg-white rounded-2xl border border-stone-100 p-5 md:p-6">
                 <h3 className="text-sm font-bold text-stone-700 uppercase tracking-widest mb-3">Feedback</h3>
                 {!attemptResult ? (
                   <p className="text-sm text-stone-400">Submit an answer to get score and coaching feedback.</p>
