@@ -157,6 +157,7 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
         session = None
         call_sid: str | None = None
         stream_started = asyncio.Event()
+        safe_caller_bypassed = False
 
         def _make_on_transcript(track_label: str):
             async def on_transcript(_conn: object, **kwargs: object) -> None:
@@ -247,6 +248,23 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
                         mongo_store.create_session(session)
                     elif caller_from_stream or dialed_from_stream:
                         mongo_store.update_session(session)
+
+                    safe_caller_bypassed = mongo_store.is_caller_in_user_safelist(
+                        session.dialed_phone,
+                        session.caller_phone,
+                    )
+                    if safe_caller_bypassed:
+                        session.safe_caller_bypassed = True
+                        mongo_store.update_session(session)
+                        logger.info(
+                            "TWILIO_MEDIA_BYPASSED_SAFE_CALLER call_sid=%s session_id=%s caller_phone=%s dialed_phone=%s",
+                            call_sid,
+                            session.session_id,
+                            session.caller_phone,
+                            session.dialed_phone,
+                        )
+                        continue
+
                     logger.info(
                         "TWILIO_MEDIA_START call_sid=%s session_id=%s caller_set=%s dialed_set=%s",
                         call_sid,
@@ -264,7 +282,7 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
                     continue
 
                 if event == "media":
-                    if not stream_started.is_set():
+                    if safe_caller_bypassed or not stream_started.is_set():
                         continue
                     media = msg.get("media") or {}
                     track = media.get("track", "inbound")

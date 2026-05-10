@@ -44,6 +44,12 @@ def normalize_phone_lookup_values(phone: str | None) -> list[str]:
     return deduped
 
 
+def phone_values_overlap(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    return bool(set(normalize_phone_lookup_values(left)) & set(normalize_phone_lookup_values(right)))
+
+
 def _safe_error_message(exc: Exception) -> str:
     message = str(exc)
     if settings.MONGODB_URI:
@@ -278,6 +284,36 @@ class MongoStore:
             logger.error("MONGO_ERROR message=%s", _safe_error_message(exc))
             return None
 
+    def is_caller_in_user_safelist(self, dialed_phone: str | None, caller_phone: str | None) -> bool:
+        if not self.is_enabled():
+            return False
+
+        phone_values = normalize_phone_lookup_values(dialed_phone)
+        if not phone_values or not caller_phone:
+            return False
+
+        try:
+            user = self.users_collection.find_one(
+                {"dialed_phone": {"$in": phone_values}},
+                {"_id": 0, "google_sub": 1, "safe_list_phone_numbers": 1},
+            )
+            if not user:
+                return False
+
+            safe_list_phone_numbers = user.get("safe_list_phone_numbers") or []
+            is_safe = any(phone_values_overlap(stored_phone, caller_phone) for stored_phone in safe_list_phone_numbers)
+            logger.info(
+                "SAFE_LIST_LOOKUP dialed_phone=%s caller_phone=%s matched=%s safe_list_count=%d",
+                dialed_phone,
+                caller_phone,
+                is_safe,
+                len(safe_list_phone_numbers),
+            )
+            return is_safe
+        except PyMongoError as exc:
+            logger.error("MONGO_ERROR message=%s", _safe_error_message(exc))
+            return False
+
     def get_calls_by_dialed_phone(self, dialed_phone: str, limit: int = 100) -> list[dict]:
         if not self.is_enabled():
             return []
@@ -304,6 +340,7 @@ class MongoStore:
             "session_id": session.session_id,
             "caller_phone": session.caller_phone,
             "dialed_phone": session.dialed_phone,
+            "safe_caller_bypassed": session.safe_caller_bypassed,
             "created_at": session.created_at,
             "updated_at": session.updated_at,
             "status": session.status,
