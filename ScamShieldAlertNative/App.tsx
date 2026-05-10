@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
 import messaging from '@react-native-firebase/messaging';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import notifee, { AndroidImportance } from '@notifee/react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -36,6 +37,7 @@ const USER_NAME_KEY = 'user_name';
 const USER_PHONE_KEY = 'user_phone';
 const TWILIO_NUMBER_KEY = 'twilio_number';
 const PUSH_TOKEN_ENDPOINT = `${BACKEND_HTTP_URL}/api/push-token`;
+const SCAM_ALERT_CHANNEL_ID = 'scam-alerts';
 
 type Screen = 'account' | 'setup' | 'protected' | 'alert';
 type PushStatus =
@@ -124,6 +126,65 @@ async function requestAndroidNotificationPermission() {
   return result === PermissionsAndroid.RESULTS.GRANTED;
 }
 
+async function ensureAndroidNotificationChannel() {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+
+  const channelId = await notifee.createChannel({
+    id: SCAM_ALERT_CHANNEL_ID,
+    name: 'Scam alerts',
+    importance: AndroidImportance.HIGH,
+    sound: 'default',
+  });
+  console.log('[ScamShield][notifications] channel ready', channelId);
+}
+
+async function displayScamNotification(data?: { [key: string]: unknown }) {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+
+  console.log('[ScamShield][notifications] displaying local alert', data);
+  await ensureAndroidNotificationChannel();
+  await notifee.displayNotification({
+    title: 'SCAM DETECTED',
+    body: 'Hang up now',
+    data: Object.fromEntries(
+      Object.entries(data ?? {}).map(([key, value]) => [key, String(value)]),
+    ),
+    android: {
+      channelId: SCAM_ALERT_CHANNEL_ID,
+      importance: AndroidImportance.HIGH,
+      pressAction: {
+        id: 'default',
+      },
+      sound: 'default',
+    },
+  });
+}
+
+async function testSystemNotification() {
+  const granted = await requestAndroidNotificationPermission();
+
+  if (!granted) {
+    Alert.alert(
+      'Notifications are off',
+      'Enable notifications in Android Settings, then test again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: Linking.openSettings },
+      ],
+    );
+    return;
+  }
+
+  await displayScamNotification({
+    type: 'scam_alert',
+    source: 'local_test',
+  });
+}
+
 function App() {
   useEffect(() => {
     GoogleSignin.configure({
@@ -174,7 +235,9 @@ function ScamShieldApp() {
           throw new Error('notification_permission_denied');
         }
 
+        await ensureAndroidNotificationChannel();
         token = await messaging().getToken();
+        console.log('[ScamShield][FCM token]', token);
         provider = 'fcm';
       } else if (ScamShieldPush) {
         token = await ScamShieldPush.requestPushToken();
@@ -203,9 +266,14 @@ function ScamShieldApp() {
 
       await assertSuccessfulResponse(response, 'Push token upload');
 
+      console.log('[ScamShield][push upload] registered', {
+        provider,
+        googleSub,
+      });
       setPushStatus('registered');
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
+      console.log('[ScamShield][push upload] failed', message);
       setPushStatus(message.includes('denied') ? 'denied' : 'failed');
       didAttemptPushRegistrationRef.current = false;
     }
@@ -246,13 +314,16 @@ function ScamShieldApp() {
 
     if (Platform.OS === 'android') {
       const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
+        console.log('[ScamShield][FCM foreground]', remoteMessage.messageId, remoteMessage.data);
         if (isScamAlertPayload(remoteMessage.data)) {
+          await displayScamNotification(remoteMessage.data);
           setScreen('alert');
         }
       });
 
       const unsubscribeOpened = messaging().onNotificationOpenedApp(
         remoteMessage => {
+          console.log('[ScamShield][FCM opened]', remoteMessage.messageId, remoteMessage.data);
           if (isScamAlertPayload(remoteMessage.data)) {
             setScreen('alert');
           }
@@ -262,6 +333,7 @@ function ScamShieldApp() {
       messaging()
         .getInitialNotification()
         .then(remoteMessage => {
+          console.log('[ScamShield][FCM initial]', remoteMessage?.messageId, remoteMessage?.data);
           if (mounted && isScamAlertPayload(remoteMessage?.data)) {
             setScreen('alert');
           }
@@ -300,6 +372,7 @@ function ScamShieldApp() {
       goToSetup: () => setScreen('setup'),
       goToProtected: () => setScreen('protected'),
       goToAlert: () => setScreen('alert'),
+      testSystemNotification,
     }),
     [],
   );
@@ -319,6 +392,7 @@ function ScamShieldApp() {
         onEnablePush={registerPushToken}
         onBackToSetup={navigation.goToSetup}
         onTestAlert={navigation.goToAlert}
+        onTestNotification={navigation.testSystemNotification}
       />
     );
   }
@@ -435,11 +509,14 @@ function AccountScreen({ onComplete }: { onComplete: () => void }) {
           <Text style={styles.brandText}>ScamShield</Text>
         </View>
 
-        <Text style={styles.setupTitle}>Create your protected profile.</Text>
-        <Text style={styles.setupSubtitle}>
-          Sign in once and add the phone number that Twilio forwards into
-          ScamShield. Future launches skip this step.
-        </Text>
+        <View style={styles.heroBlock}>
+          <Text style={styles.eyebrow}>Account Setup</Text>
+          <Text style={styles.setupTitle}>Create your protected profile.</Text>
+          <Text style={styles.setupSubtitle}>
+            Sign in once and add the phone number that Twilio forwards into
+            ScamShield. Future launches skip this step.
+          </Text>
+        </View>
 
         <View style={styles.panel}>
           <Text style={styles.panelLabel}>Google account</Text>
@@ -496,7 +573,10 @@ function AccountScreen({ onComplete }: { onComplete: () => void }) {
 function BootScreen() {
   return (
     <SafeAreaView style={styles.loadingScreen}>
-      <ActivityIndicator color="#8ef2c1" size="large" />
+      <View style={styles.loadingBadge}>
+        <Text style={styles.loadingBadgeText}>ScamShield</Text>
+      </View>
+      <ActivityIndicator color="#4e844a" size="large" />
       <Text style={styles.loadingTitle}>Preparing ScamShield</Text>
       <Text style={styles.loadingBody}>
         Checking whether this device has already been protected.
@@ -576,13 +656,27 @@ function SetupScreen({ onReady }: { onReady: () => void }) {
           <Text style={styles.brandText}>ScamShield</Text>
         </View>
 
-        <Text style={styles.setupTitle}>
-          Turn this phone into a scam alert device.
-        </Text>
-        <Text style={styles.setupSubtitle}>
-          Import trusted numbers once, forward calls to your demo line, and keep
-          ScamShield open while protection stays active.
-        </Text>
+        <View style={styles.heroBlock}>
+          <Text style={styles.eyebrow}>Device Setup</Text>
+          <Text style={styles.setupTitle}>
+            Turn this phone into a scam alert device.
+          </Text>
+          <Text style={styles.setupSubtitle}>
+            Import trusted numbers once, forward calls to your demo line, and keep
+            ScamShield open while protection stays active.
+          </Text>
+        </View>
+
+        <View style={styles.highlightStrip}>
+          <View style={styles.highlightItem}>
+            <Text style={styles.highlightValue}>1x</Text>
+            <Text style={styles.highlightLabel}>contact import</Text>
+          </View>
+          <View style={styles.highlightItem}>
+            <Text style={styles.highlightValue}>24/7</Text>
+            <Text style={styles.highlightLabel}>alert readiness</Text>
+          </View>
+        </View>
 
         <View style={styles.panel}>
           <Text style={styles.panelLabel}>Forwarding number</Text>
@@ -668,11 +762,13 @@ function ProtectedScreen({
   onEnablePush,
   onBackToSetup,
   onTestAlert,
+  onTestNotification,
 }: {
   pushStatus: PushStatus;
   onEnablePush: () => void;
   onBackToSetup: () => void;
   onTestAlert: () => void;
+  onTestNotification: () => void;
 }) {
   const pushLabel =
     pushStatus === 'registered'
@@ -701,53 +797,62 @@ function ProtectedScreen({
 
   return (
     <SafeAreaView style={styles.protectedScreen}>
-      <View style={styles.protectedHeader}>
-        <View>
-          <Text style={styles.panelLabel}>Alert readiness</Text>
-          <Text style={styles.protectedTitle}>Call protected</Text>
+      <ScrollView
+        contentContainerStyle={styles.protectedContent}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.protectedHeader}>
+          <View>
+            <Text style={styles.eyebrow}>Alert Readiness</Text>
+            <Text style={styles.protectedTitle}>Call protected</Text>
+          </View>
+          <View style={styles.statusPill}>
+            <View
+              style={[
+                styles.statusDot,
+                pushStatus === 'registered'
+                  ? styles.readyDot
+                  : styles.waitingDot,
+              ]}
+            />
+            <Text style={styles.statusText}>{pushLabel}</Text>
+          </View>
         </View>
-        <View style={styles.statusPill}>
-          <View
-            style={[
-              styles.statusDot,
-              pushStatus === 'registered'
-                ? styles.readyDot
-                : styles.waitingDot,
-            ]}
-          />
-          <Text style={styles.statusText}>{pushLabel}</Text>
+
+        <View style={styles.heroCard}>
+          <View style={styles.shieldFrame}>
+            <View style={styles.shieldCore}>
+              <Text style={styles.shieldText}>S</Text>
+            </View>
+          </View>
+
+          <Text style={styles.protectedMessage}>ScamShield is standing by.</Text>
+          <Text style={styles.protectedBody}>
+            Scam alerts arrive through push notifications when this app is in the
+            background. Local testing still works with the test button below.
+          </Text>
         </View>
-      </View>
 
-      <View style={styles.shieldFrame}>
-        <View style={styles.shieldCore}>
-          <Text style={styles.shieldText}>S</Text>
+        <View style={styles.statePanel}>
+          <Text style={styles.panelLabel}>Current state</Text>
+          <Text style={styles.stateValue}>{pushLabel}</Text>
+          <Text style={styles.pushValue}>{pushDetail}</Text>
         </View>
-      </View>
 
-      <Text style={styles.protectedMessage}>ScamShield is standing by.</Text>
-      <Text style={styles.protectedBody}>
-        Scam alerts arrive through push notifications when this app is in the
-        background. Local testing still works with the test button below.
-      </Text>
-
-      <View style={styles.statePanel}>
-        <Text style={styles.panelLabel}>Current state</Text>
-        <Text style={styles.stateValue}>{pushLabel}</Text>
-        <Text style={styles.pushValue}>{pushDetail}</Text>
-      </View>
-
-      <View style={styles.footerActions}>
-        <Pressable onPress={onTestAlert} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Test alert</Text>
-        </Pressable>
-        <Pressable onPress={onEnablePush} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Enable push</Text>
-        </Pressable>
-        <Pressable onPress={onBackToSetup} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Setup</Text>
-        </Pressable>
-      </View>
+        <View style={styles.footerActions}>
+          <Pressable onPress={onTestAlert} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Test alert</Text>
+          </Pressable>
+          <Pressable onPress={onTestNotification} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Test notification</Text>
+          </Pressable>
+          <Pressable onPress={onEnablePush} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Enable push</Text>
+          </Pressable>
+          <Pressable onPress={onBackToSetup} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Setup</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -768,7 +873,8 @@ function AlertScreen({ onDone }: { onDone: () => void }) {
 
   return (
     <SafeAreaView style={styles.alertScreen}>
-      <View style={styles.alertRing} />
+      <View style={styles.alertRingOuter} />
+      <View style={styles.alertRingInner} />
       <View style={styles.alertContent}>
         <Text style={styles.alertLabel}>Alert</Text>
         <Text style={styles.alertTitle}>SCAM DETECTED</Text>
@@ -788,23 +894,37 @@ function AlertScreen({ onDone }: { onDone: () => void }) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#07111f',
+    backgroundColor: '#FAF8F2',
   },
   loadingScreen: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#07111f',
+    backgroundColor: '#FAF8F2',
     paddingHorizontal: 28,
-    gap: 14,
+    gap: 16,
+  },
+  loadingBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: '#E3EDE1',
+    borderWidth: 1,
+    borderColor: '#C5D9C2',
+  },
+  loadingBadgeText: {
+    color: '#30542E',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   loadingTitle: {
-    color: '#f5fbff',
-    fontSize: 28,
+    color: '#1F2A1F',
+    fontSize: 30,
     fontWeight: '800',
   },
   loadingBody: {
-    color: '#9db6ca',
+    color: '#6B7280',
     fontSize: 16,
     lineHeight: 24,
     textAlign: 'center',
@@ -823,45 +943,86 @@ const styles = StyleSheet.create({
   logoMark: {
     width: 42,
     height: 42,
-    borderRadius: 8,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#8ef2c1',
+    backgroundColor: '#E3EDE1',
+    borderWidth: 1,
+    borderColor: '#C5D9C2',
   },
   logoText: {
-    color: '#04101a',
+    color: '#284426',
     fontSize: 22,
     fontWeight: '900',
   },
   brandText: {
-    color: '#f5fbff',
+    color: '#284426',
     fontSize: 20,
     fontWeight: '900',
   },
+  heroBlock: {
+    gap: 10,
+  },
+  eyebrow: {
+    alignSelf: 'flex-start',
+    color: '#4E844A',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
   setupTitle: {
-    color: '#f5fbff',
+    color: '#1F2A1F',
     fontSize: 34,
     lineHeight: 40,
     fontWeight: '900',
   },
   setupSubtitle: {
-    color: '#9db6ca',
+    color: '#57534E',
     fontSize: 16,
     lineHeight: 24,
   },
+  highlightStrip: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  highlightItem: {
+    flex: 1,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    backgroundColor: '#284426',
+  },
+  highlightValue: {
+    color: '#FAF8F2',
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  highlightLabel: {
+    color: '#D6E3D4',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginTop: 6,
+  },
   panel: {
-    borderRadius: 8,
+    borderRadius: 22,
     padding: 18,
     gap: 12,
-    backgroundColor: '#0c1d2f',
+    backgroundColor: '#FEFEFB',
     borderWidth: 1,
-    borderColor: '#20384f',
+    borderColor: '#E7E1D5',
+    shadowColor: '#000000',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   panelLabel: {
-    color: '#8ef2c1',
+    color: '#4E844A',
     fontSize: 13,
     fontWeight: '800',
-    letterSpacing: 0,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
   numberRow: {
@@ -871,88 +1032,90 @@ const styles = StyleSheet.create({
   },
   numberText: {
     flex: 1,
-    color: '#f5fbff',
-    fontSize: 28,
-    lineHeight: 34,
+    color: '#1C1917',
+    fontSize: 30,
+    lineHeight: 36,
     fontWeight: '900',
   },
   copyButton: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#f5fbff',
+    borderRadius: 14,
+    backgroundColor: '#F4F8F3',
+    borderWidth: 1,
+    borderColor: '#C5D9C2',
   },
   copyButtonText: {
-    color: '#07111f',
+    color: '#30542E',
     fontSize: 15,
     fontWeight: '800',
   },
   stepText: {
-    color: '#dce9f4',
+    color: '#44403C',
     fontSize: 16,
     lineHeight: 24,
   },
   panelBody: {
-    color: '#dce9f4',
+    color: '#57534E',
     fontSize: 15,
     lineHeight: 23,
   },
   input: {
     minHeight: 52,
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#29445e',
-    backgroundColor: '#07111f',
-    color: '#f5fbff',
+    borderColor: '#E7E1D5',
+    backgroundColor: '#FAF8F2',
+    color: '#1C1917',
     fontSize: 16,
     paddingHorizontal: 14,
   },
   warningText: {
-    color: '#ffc0b2',
+    color: '#B91C1C',
     fontSize: 15,
     lineHeight: 22,
   },
   successText: {
-    color: '#8ef2c1',
+    color: '#3B6838',
     fontSize: 15,
     lineHeight: 22,
     fontWeight: '700',
   },
   primaryButton: {
     minHeight: 54,
-    borderRadius: 8,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#8ef2c1',
+    backgroundColor: '#4E844A',
   },
   primaryButtonText: {
-    color: '#04101a',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '900',
   },
   readyButton: {
     minHeight: 58,
-    borderRadius: 8,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffe089',
+    backgroundColor: '#213821',
   },
   readyButtonText: {
-    color: '#281700',
+    color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '900',
   },
   demoButton: {
     minHeight: 54,
-    borderRadius: 8,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#132b43',
+    backgroundColor: '#F4F8F3',
     borderWidth: 1,
-    borderColor: '#29445e',
+    borderColor: '#C5D9C2',
   },
   demoButtonText: {
-    color: '#f5fbff',
+    color: '#30542E',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -961,7 +1124,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   textButtonText: {
-    color: '#f5fbff',
+    color: '#4E844A',
     fontSize: 15,
     fontWeight: '800',
   },
@@ -970,10 +1133,13 @@ const styles = StyleSheet.create({
   },
   protectedScreen: {
     flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    backgroundColor: '#06101e',
+    backgroundColor: '#FAF8F2',
+  },
+  protectedContent: {
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 32,
+    gap: 18,
   },
   protectedHeader: {
     width: '100%',
@@ -983,8 +1149,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   protectedTitle: {
-    color: '#f5fbff',
-    fontSize: 30,
+    color: '#1F2A1F',
+    fontSize: 32,
     fontWeight: '900',
     marginTop: 6,
   },
@@ -994,10 +1160,10 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#0c1d2f',
+    borderRadius: 999,
+    backgroundColor: '#FEFEFB',
     borderWidth: 1,
-    borderColor: '#20384f',
+    borderColor: '#E7E1D5',
   },
   statusDot: {
     width: 10,
@@ -1005,27 +1171,40 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   readyDot: {
-    backgroundColor: '#8ef2c1',
+    backgroundColor: '#4E844A',
   },
   waitingDot: {
-    backgroundColor: '#ffd36e',
+    backgroundColor: '#D97706',
   },
   statusText: {
-    color: '#dce9f4',
+    color: '#44403C',
     fontSize: 14,
     fontWeight: '800',
+  },
+  heroCard: {
+    alignItems: 'center',
+    borderRadius: 28,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    backgroundColor: '#FEFEFB',
+    borderWidth: 1,
+    borderColor: '#E7E1D5',
+    shadowColor: '#000000',
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 3,
   },
   shieldFrame: {
     width: 220,
     height: 220,
     borderRadius: 110,
-    marginTop: 56,
-    marginBottom: 28,
+    marginBottom: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#113421',
+    backgroundColor: '#E3EDE1',
     borderWidth: 1,
-    borderColor: '#2e6b4a',
+    borderColor: '#C5D9C2',
   },
   shieldCore: {
     width: 148,
@@ -1033,65 +1212,62 @@ const styles = StyleSheet.create({
     borderRadius: 74,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#8ef2c1',
+    backgroundColor: '#4E844A',
   },
   shieldText: {
-    color: '#04101a',
+    color: '#FFFFFF',
     fontSize: 72,
     fontWeight: '900',
   },
   protectedMessage: {
-    color: '#f5fbff',
+    color: '#1F2A1F',
     fontSize: 26,
     lineHeight: 32,
     fontWeight: '900',
     textAlign: 'center',
   },
   protectedBody: {
-    color: '#a7bfd1',
+    color: '#57534E',
     fontSize: 16,
     lineHeight: 24,
     textAlign: 'center',
     marginTop: 12,
-    marginBottom: 28,
   },
   statePanel: {
     width: '100%',
-    borderRadius: 8,
+    borderRadius: 22,
     padding: 18,
     gap: 8,
-    backgroundColor: '#0c1d2f',
+    backgroundColor: '#FEFEFB',
     borderWidth: 1,
-    borderColor: '#20384f',
+    borderColor: '#E7E1D5',
   },
   stateValue: {
-    color: '#dce9f4',
+    color: '#1C1917',
     fontSize: 18,
     fontWeight: '800',
   },
   pushValue: {
-    color: '#a7bfd1',
+    color: '#57534E',
     fontSize: 15,
     lineHeight: 22,
   },
   footerActions: {
-    marginTop: 'auto',
     width: '100%',
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 12,
   },
   secondaryButton: {
-    flex: 1,
     minHeight: 52,
-    borderRadius: 8,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#132b43',
+    backgroundColor: '#F4F8F3',
     borderWidth: 1,
-    borderColor: '#29445e',
+    borderColor: '#C5D9C2',
   },
   secondaryButtonText: {
-    color: '#f5fbff',
+    color: '#30542E',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -1100,45 +1276,59 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
-    backgroundColor: '#9d1422',
+    backgroundColor: '#7F1D1D',
   },
-  alertRing: {
+  alertRingOuter: {
     position: 'absolute',
-    width: 320,
-    height: 320,
-    borderRadius: 160,
-    backgroundColor: '#b82130',
+    width: 330,
+    height: 330,
+    borderRadius: 165,
+    backgroundColor: '#991B1B',
+    opacity: 0.85,
+  },
+  alertRingInner: {
+    position: 'absolute',
+    width: 250,
+    height: 250,
+    borderRadius: 125,
+    backgroundColor: '#B91C1C',
     borderWidth: 1,
-    borderColor: '#ef7d86',
+    borderColor: '#FCA5A5',
   },
   alertContent: {
     width: '100%',
     maxWidth: 360,
     alignItems: 'center',
     gap: 14,
+    borderRadius: 28,
+    paddingHorizontal: 26,
+    paddingVertical: 30,
+    backgroundColor: 'rgba(127, 29, 29, 0.58)',
+    borderWidth: 1,
+    borderColor: 'rgba(252, 165, 165, 0.35)',
   },
   alertLabel: {
-    color: '#ffd5d5',
+    color: '#FECACA',
     fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 0,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   alertTitle: {
-    color: '#fff5f5',
+    color: '#FEF2F2',
     fontSize: 42,
     lineHeight: 46,
     fontWeight: '900',
     textAlign: 'center',
   },
   alertMessage: {
-    color: '#fff5f5',
+    color: '#FEF2F2',
     fontSize: 28,
     fontWeight: '900',
     textAlign: 'center',
   },
   alertBody: {
-    color: '#ffd7d2',
+    color: '#FECACA',
     fontSize: 17,
     lineHeight: 25,
     textAlign: 'center',
@@ -1147,13 +1337,13 @@ const styles = StyleSheet.create({
     marginTop: 24,
     width: '100%',
     minHeight: 58,
-    borderRadius: 8,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff5f5',
+    backgroundColor: '#FEF2F2',
   },
   alertButtonText: {
-    color: '#8a1020',
+    color: '#991B1B',
     fontSize: 17,
     fontWeight: '900',
   },
