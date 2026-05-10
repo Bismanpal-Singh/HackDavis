@@ -55,6 +55,15 @@ class InMemorySessionStore:
         self._sessions[session.session_id] = session
         return session
 
+    def get_or_create_by_id(self, session_id: str) -> tuple[SessionState, bool]:
+        """Return existing session or create one with the given id (e.g. Twilio CallSid)."""
+        existing = self._sessions.get(session_id)
+        if existing is not None:
+            return existing, False
+        session = SessionState(session_id=session_id)
+        self._sessions[session_id] = session
+        return session, True
+
     def get_session(self, session_id: str) -> SessionState | None:
         return self._sessions.get(session_id)
 

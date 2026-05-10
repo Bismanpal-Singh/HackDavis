@@ -2,7 +2,9 @@
 
 ScamShield is a backend-only FastAPI service for hackathon scam-call detection. It receives transcript chunks over WebSocket, scores scam risk with rule-based detection, optionally validates suspicious sessions with Claude or deterministic mock Claude, fires a one-time alert, persists session/report data to MongoDB Atlas when enabled, and exposes report/debug endpoints.
 
-This folder intentionally does not include frontend, UI, audio capture, Deepgram, ElevenLabs, SMS/Twilio, or authentication code. It stores transcript text and detection/report data only; it does not store raw audio.
+**Twilio inbound voice:** Configure your Twilio number’s **A call comes in** webhook to `POST https://<PUBLIC_BASE_URL>/twilio/voice` (HTTPS). Twilio loads TwiML that starts a Media Stream to `wss://<same-host>/twilio/media`. Audio is transcribed with Deepgram (streaming), then each finalized phrase runs the same detection path as WebSocket `/detect`. Raw audio is not persisted.
+
+This repo does not ship a frontend or authentication; ElevenLabs/SMS are out of scope unless you add them.
 
 ## Structure
 
@@ -18,6 +20,9 @@ backend/
     decision_engine.py
     report_builder.py
     mongo_store.py
+    detection_pipeline.py
+    public_url.py
+    twilio_stream.py
   scripts/
     test_backend_ws.py
   requirements.txt
@@ -102,6 +107,8 @@ Endpoints:
 
 - Health: `GET http://localhost:8000/health`
 - Detection WebSocket: `ws://localhost:8000/detect`
+- Twilio voice webhook (TwiML): `POST/GET https://<PUBLIC_BASE_URL>/twilio/voice`
+- Twilio Media Stream WebSocket: `wss://<PUBLIC_BASE_URL>/twilio/media` (opened by Twilio; do not call from browser)
 - Report: `GET http://localhost:8000/report/{session_id}`
 - Debug sessions: `GET http://localhost:8000/debug/sessions`
 

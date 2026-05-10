@@ -11,16 +11,20 @@ logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.I
 logger = logging.getLogger("scamshield")
 
 from app.decision_engine import DecisionEngine, get_risk_level
+from app.detection_pipeline import process_transcript_chunk
 from app.models import ErrorResponse, TranscriptChunk
 from app.mongo_store import mongo_store
 from app.report_builder import build_report, build_report_from_document
 from app.rule_scorer import RuleScorer
 from app.session_store import session_store
+from app.twilio_stream import create_twilio_router
 
 
 app = FastAPI(title=settings.APP_NAME)
 rule_scorer = RuleScorer()
 decision_engine = DecisionEngine()
+
+app.include_router(create_twilio_router(rule_scorer, decision_engine))
 
 
 @app.get("/health")
@@ -30,6 +34,9 @@ async def health() -> dict:
         "mongo_enabled": mongo_store.is_enabled(),
         "mongo_connected": mongo_store.is_connected(),
         "mock_claude": settings.MOCK_CLAUDE,
+        "twilio_configured": settings.TWILIO_CONFIGURED,
+        "deepgram_configured": settings.DEEPGRAM_CONFIGURED,
+        "public_base_url_set": bool((settings.PUBLIC_BASE_URL or "").strip()),
     }
 
 
@@ -107,25 +114,13 @@ async def detect(websocket: WebSocket) -> None:
                 len(chunk.transcript),
                 chunk.timestamp,
             )
-            session.add_transcript(chunk.transcript, chunk.timestamp)
-            rule_result = rule_scorer.score_text(chunk.transcript)
-            response = decision_engine.process_chunk(session, chunk, rule_result)
-            logger.info(
-                "RULE_SCORE session_id=%s score_delta=%d current_score=%d matched_categories=%s flagged_phrases=%s",
-                session.session_id,
-                rule_result["score_delta"],
-                session.current_score,
-                rule_result["matched_categories"],
-                rule_result["flagged_phrases"],
+            response = process_transcript_chunk(
+                session,
+                chunk.transcript,
+                rule_scorer=rule_scorer,
+                decision_engine=decision_engine,
+                timestamp=chunk.timestamp,
             )
-            logger.info(
-                "DETECTION_RESPONSE session_id=%s score=%d risk_level=%s alert=%s",
-                session.session_id,
-                response.score,
-                response.risk_level,
-                response.alert,
-            )
-            mongo_store.update_session(session)
 
             await websocket.send_json(response.model_dump())
     except WebSocketDisconnect:
@@ -146,6 +141,9 @@ async def startup_event() -> None:
     logger.info("PERSIST_TO_MONGO=%s", str(settings.PERSIST_TO_MONGO).lower())
     logger.info("MONGO_CONFIGURED=%s", str(settings.MONGO_CONFIGURED).lower())
     logger.info("CLAUDE_CONFIGURED=%s", str(settings.CLAUDE_CONFIGURED).lower())
+    logger.info("TWILIO_CONFIGURED=%s", str(settings.TWILIO_CONFIGURED).lower())
+    logger.info("DEEPGRAM_CONFIGURED=%s", str(settings.DEEPGRAM_CONFIGURED).lower())
+    logger.info("PUBLIC_BASE_URL set=%s", str(bool((settings.PUBLIC_BASE_URL or "").strip())).lower())
     logger.info("Mongo persistence %s", "enabled" if mongo_store.is_enabled() else "disabled")
     logger.info("Mock Claude %s", "enabled" if settings.MOCK_CLAUDE else "disabled")
 

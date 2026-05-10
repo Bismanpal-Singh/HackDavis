@@ -64,6 +64,13 @@ class Settings:
     MONGODB_DB: str = os.environ.get("MONGODB_DB", "scamshield")
     MONGODB_COLLECTION: str = os.environ.get("MONGODB_COLLECTION", "call_sessions")
 
+    TWILIO_ACCOUNT_SID: str = os.environ.get("TWILIO_ACCOUNT_SID", "")
+    TWILIO_API_KEY_SID: str = os.environ.get("TWILIO_API_KEY_SID", "")
+    TWILIO_API_KEY_SECRET: str = os.environ.get("TWILIO_API_KEY_SECRET", "")
+    TWILIO_PHONE_NUMBER: str = os.environ.get("TWILIO_PHONE_NUMBER", "")
+    PUBLIC_BASE_URL: str = os.environ.get("PUBLIC_BASE_URL", "")
+    DEEPGRAM_API_KEY: str = os.environ.get("DEEPGRAM_API_KEY", "")
+
     @property
     def CLAUDE_CONFIGURED(self) -> bool:
         return bool(self.ANTHROPIC_API_KEY)
@@ -71,6 +78,14 @@ class Settings:
     @property
     def MONGO_CONFIGURED(self) -> bool:
         return bool(self.MONGODB_URI)
+
+    @property
+    def TWILIO_CONFIGURED(self) -> bool:
+        return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_API_KEY_SID and self.TWILIO_API_KEY_SECRET)
+
+    @property
+    def DEEPGRAM_CONFIGURED(self) -> bool:
+        return bool(self.DEEPGRAM_API_KEY)
 
 
 settings = Settings()
