@@ -96,6 +96,16 @@ function buildDecoys(transcript, redFlags) {
   return [...new Set(candidates)].slice(0, 3)
 }
 
+function isExpectedPlayInterruption(error) {
+  const message = String(error?.message || '').toLowerCase()
+  return (
+    message.includes('play() request was interrupted')
+    || message.includes('interrupted by a call to pause')
+    || message.includes('the operation was aborted')
+    || error?.name === 'AbortError'
+  )
+}
+
 function StatCard({ label, value }) {
   return (
     <div className="bg-white rounded-2xl p-5 border border-stone-100 shadow-soft">
@@ -405,6 +415,9 @@ export default function Academy() {
       }
       await audio.play()
     } catch (err) {
+      if (isExpectedPlayInterruption(err)) {
+        return
+      }
       const message = err?.message || 'Voice trainer is unavailable. You can still read the transcript.'
       setVoiceMessage(message)
       setAudioError(message)
@@ -424,8 +437,10 @@ export default function Academy() {
       if (isAudioPaused) {
         try {
           await currentAudioRef.current.play()
-        } catch {
-          setAudioError('Unable to resume call audio.')
+        } catch (err) {
+          if (!isExpectedPlayInterruption(err)) {
+            setAudioError('Unable to resume call audio.')
+          }
         }
         return
       }
@@ -447,8 +462,10 @@ export default function Academy() {
       if (isAudioPaused) {
         try {
           await currentAudioRef.current.play()
-        } catch {
-          setAudioError('Unable to resume feedback audio.')
+        } catch (err) {
+          if (!isExpectedPlayInterruption(err)) {
+            setAudioError('Unable to resume feedback audio.')
+          }
         }
         return
       }
