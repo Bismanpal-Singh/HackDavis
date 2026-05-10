@@ -70,6 +70,7 @@ class Settings:
     TWILIO_API_KEY_SID: str = os.environ.get("TWILIO_API_KEY_SID", "")
     TWILIO_API_KEY_SECRET: str = os.environ.get("TWILIO_API_KEY_SECRET", "")
     TWILIO_PHONE_NUMBER: str = os.environ.get("TWILIO_PHONE_NUMBER", "")
+    GRANDMAS_REAL_NUMBER: str = os.environ.get("GRANDMAS_REAL_NUMBER", "")
     PUBLIC_BASE_URL: str = os.environ.get("PUBLIC_BASE_URL", "")
     DEEPGRAM_API_KEY: str = os.environ.get("DEEPGRAM_API_KEY", "")
 

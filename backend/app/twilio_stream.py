@@ -107,12 +107,22 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
         )
 
         vr = VoiceResponse()
-        # <Connect><Stream> keeps the call leg open until the Media Stream ends.
-        # <Start><Stream> is non-blocking; an empty Response after it often hangs up immediately.
-        stream = vr.connect().stream(url=wss_url, track="inbound_track")
-        # Passed through to Media Stream "start" customParameters for Mongo/reporting.
+        # <Start><Stream> is non-blocking — forks audio to the websocket without blocking
+        # call progress, so the <Dial> below executes immediately afterwards.
+        stream = vr.start().stream(url=wss_url, track="both_tracks")
         stream.parameter(name="caller_phone", value=caller_phone or "")
         stream.parameter(name="dialed_phone", value=dialed_phone or "")
+        # Forward the call to the real destination number. Use the original caller's
+        # number as callerId so the recipient sees who is actually calling them.
+        if settings.GRANDMAS_REAL_NUMBER:
+            vr.dial(settings.GRANDMAS_REAL_NUMBER, caller_id=caller_phone or settings.TWILIO_PHONE_NUMBER)
+            logger.info(
+                "TWILIO_DIAL_ADDED destination=%s caller_id=%s",
+                settings.GRANDMAS_REAL_NUMBER,
+                caller_phone or settings.TWILIO_PHONE_NUMBER,
+            )
+        else:
+            logger.warning("TWILIO_DIAL_SKIPPED reason=GRANDMAS_REAL_NUMBER_not_set")
         return str(vr)
 
     @router.post("/twilio/voice")
@@ -249,8 +259,6 @@ def create_twilio_router(rule_scorer: RuleScorer, decision_engine: DecisionEngin
                         continue
                     media = msg.get("media") or {}
                     track = media.get("track", "inbound")
-                    if track not in ("inbound", "inbound_track", None):
-                        continue
                     payload_b64 = media.get("payload")
                     if not payload_b64:
                         continue
