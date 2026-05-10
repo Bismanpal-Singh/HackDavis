@@ -26,6 +26,22 @@ jest.mock('@react-native-firebase/messaging', () => {
   return messagingMock;
 });
 
+jest.mock('@notifee/react-native', () => ({
+  __esModule: true,
+  default: {
+    createChannel: jest.fn().mockResolvedValue('scam-alerts-urgent-v2'),
+    displayNotification: jest.fn().mockResolvedValue(undefined),
+    onForegroundEvent: jest.fn(() => jest.fn()),
+    getInitialNotification: jest.fn().mockResolvedValue(null),
+  },
+  AndroidCategory: {ALARM: 'ALARM'},
+  AndroidColor: {RED: '#ff0000'},
+  AndroidImportance: {HIGH: 4},
+  AndroidStyle: {BIGTEXT: 'BIGTEXT'},
+  AndroidVisibility: {PUBLIC: 1},
+  EventType: {PRESS: 1},
+}));
+
 jest.mock('@react-native-google-signin/google-signin', () => ({
   GoogleSignin: {
     configure: jest.fn(),

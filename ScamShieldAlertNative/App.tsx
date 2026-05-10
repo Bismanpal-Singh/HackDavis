@@ -2,11 +2,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
 import messaging from '@react-native-firebase/messaging';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
+import notifee, {
+  AndroidCategory,
+  AndroidColor,
+  AndroidImportance,
+  AndroidStyle,
+  AndroidVisibility,
+  EventType,
+} from '@notifee/react-native';
+import { BACKEND_HTTP_URL } from './backend.config';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Linking,
   NativeEventEmitter,
   NativeModules,
@@ -18,6 +27,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  Vibration,
   View,
 } from 'react-native';
 import Contacts from 'react-native-contacts';
@@ -28,7 +38,6 @@ import {
 } from 'react-native-safe-area-context';
 
 const TWILIO_NUMBER = '(855) 555-0199';
-const BACKEND_HTTP_URL = 'https://merchandise-scope-gets-disks.trycloudflare.com';
 const GOOGLE_WEB_CLIENT_ID = '622151238741-uflrd08u48mkdbicer6204ev4gk5022l.apps.googleusercontent.com';
 const SETUP_COMPLETE_KEY = 'setup_complete';
 const USER_REGISTERED_KEY = 'user_registered';
@@ -36,8 +45,10 @@ const GOOGLE_SUB_KEY = 'google_sub';
 const USER_NAME_KEY = 'user_name';
 const USER_PHONE_KEY = 'user_phone';
 const TWILIO_NUMBER_KEY = 'twilio_number';
+const SAFE_LIST_COUNT_KEY = 'safe_list_count';
 const PUSH_TOKEN_ENDPOINT = `${BACKEND_HTTP_URL}/api/push-token`;
-const SCAM_ALERT_CHANNEL_ID = 'scam-alerts';
+const SCAM_ALERT_CHANNEL_ID = 'scam-alerts-urgent-v2';
+const SCAM_ALERT_VIBRATION_PATTERN = [1, 700, 150, 700, 150, 1000];
 
 type Screen = 'account' | 'setup' | 'protected' | 'alert';
 type PushStatus =
@@ -91,6 +102,30 @@ async function assertSuccessfulResponse(response: Response, action: string) {
   throw new Error(`${action} failed with status ${response.status}.${detail}`);
 }
 
+function assertBackendConfigured() {
+  const configuredUrl = String(BACKEND_HTTP_URL);
+  if (
+    !configuredUrl ||
+    configuredUrl === 'https://your-current-cloudflare-or-ngrok-url'
+  ) {
+    throw new Error(
+      'Set your live backend URL in backend.config.ts before using registration.',
+    );
+  }
+}
+
+function describeNetworkError(action: string, error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (
+    message.includes('Network request failed') ||
+    message.includes('Load failed')
+  ) {
+    return `${action} could not reach ${BACKEND_HTTP_URL}. Check that your backend tunnel is still running and update backend.config.ts if the public URL changed.`;
+  }
+
+  return message || `${action} failed.`;
+}
+
 async function requestContactsPermission() {
   if (Platform.OS === 'android') {
     const result = await PermissionsAndroid.request(
@@ -133,11 +168,30 @@ async function ensureAndroidNotificationChannel() {
 
   const channelId = await notifee.createChannel({
     id: SCAM_ALERT_CHANNEL_ID,
-    name: 'Scam alerts',
+    name: 'Urgent scam alerts',
     importance: AndroidImportance.HIGH,
+    vibration: true,
+    vibrationPattern: SCAM_ALERT_VIBRATION_PATTERN,
+    lights: true,
+    lightColor: AndroidColor.RED,
     sound: 'default',
   });
   console.log('[ScamShield][notifications] channel ready', channelId);
+}
+
+function fireUrgentAlertHaptics() {
+  if (Platform.OS === 'android') {
+    Vibration.vibrate([0, 700, 150, 700, 150, 1000]);
+  }
+
+  [0, 500, 1000].forEach(delay => {
+    setTimeout(() => {
+      HapticFeedback.trigger('notificationError', {
+        enableVibrateFallback: true,
+        ignoreAndroidSystemSettings: false,
+      });
+    }, delay);
+  });
 }
 
 async function displayScamNotification(data?: { [key: string]: unknown }) {
@@ -146,42 +200,38 @@ async function displayScamNotification(data?: { [key: string]: unknown }) {
   }
 
   console.log('[ScamShield][notifications] displaying local alert', data);
+  fireUrgentAlertHaptics();
   await ensureAndroidNotificationChannel();
   await notifee.displayNotification({
     title: 'SCAM DETECTED',
-    body: 'Hang up now',
+    subtitle: 'ScamShield urgent warning',
+    body: 'Hang up now. This call has been flagged as a high-risk scam.',
     data: Object.fromEntries(
       Object.entries(data ?? {}).map(([key, value]) => [key, String(value)]),
     ),
     android: {
       channelId: SCAM_ALERT_CHANNEL_ID,
+      category: AndroidCategory.ALARM,
+      color: '#D90429',
+      colorized: true,
       importance: AndroidImportance.HIGH,
+      lights: [AndroidColor.RED, 600, 300],
+      loopSound: true,
+      ongoing: true,
       pressAction: {
         id: 'default',
       },
+      fullScreenAction: {
+        id: 'default',
+      },
       sound: 'default',
+      style: {
+        type: AndroidStyle.BIGTEXT,
+        text: 'SCAM DETECTED. Hang up now. This call has been flagged as a high-risk scam by ScamShield.',
+      },
+      vibrationPattern: SCAM_ALERT_VIBRATION_PATTERN,
+      visibility: AndroidVisibility.PUBLIC,
     },
-  });
-}
-
-async function testSystemNotification() {
-  const granted = await requestAndroidNotificationPermission();
-
-  if (!granted) {
-    Alert.alert(
-      'Notifications are off',
-      'Enable notifications in Android Settings, then test again.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Open Settings', onPress: Linking.openSettings },
-      ],
-    );
-    return;
-  }
-
-  await displayScamNotification({
-    type: 'scam_alert',
-    source: 'local_test',
   });
 }
 
@@ -205,10 +255,17 @@ function App() {
 function ScamShieldApp() {
   const [screen, setScreen] = useState<Screen>('setup');
   const [isBooting, setIsBooting] = useState(true);
+  const [urgentAlertVisible, setUrgentAlertVisible] = useState(false);
   const [pushStatus, setPushStatus] = useState<PushStatus>(
     Platform.OS === 'ios' ? 'idle' : 'unsupported',
   );
   const didAttemptPushRegistrationRef = useRef(false);
+
+  const showUrgentInAppAlert = useCallback(() => {
+    console.log('[ScamShield][urgent banner] show');
+    fireUrgentAlertHaptics();
+    setUrgentAlertVisible(true);
+  }, []);
 
   const registerPushToken = useCallback(async () => {
     if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
@@ -317,6 +374,7 @@ function ScamShieldApp() {
         console.log('[ScamShield][FCM foreground]', remoteMessage.messageId, remoteMessage.data);
         if (isScamAlertPayload(remoteMessage.data)) {
           await displayScamNotification(remoteMessage.data);
+          showUrgentInAppAlert();
           setScreen('alert');
         }
       });
@@ -325,6 +383,7 @@ function ScamShieldApp() {
         remoteMessage => {
           console.log('[ScamShield][FCM opened]', remoteMessage.messageId, remoteMessage.data);
           if (isScamAlertPayload(remoteMessage.data)) {
+            showUrgentInAppAlert();
             setScreen('alert');
           }
         },
@@ -335,6 +394,7 @@ function ScamShieldApp() {
         .then(remoteMessage => {
           console.log('[ScamShield][FCM initial]', remoteMessage?.messageId, remoteMessage?.data);
           if (mounted && isScamAlertPayload(remoteMessage?.data)) {
+            showUrgentInAppAlert();
             setScreen('alert');
           }
         })
@@ -350,6 +410,7 @@ function ScamShieldApp() {
             | undefined;
           console.log('[ScamShield][notifee press]', data);
           if (isScamAlertPayload(data)) {
+            showUrgentInAppAlert();
             setScreen('alert');
           }
         },
@@ -363,6 +424,7 @@ function ScamShieldApp() {
             | undefined;
           console.log('[ScamShield][notifee initial]', data);
           if (mounted && isScamAlertPayload(data)) {
+            showUrgentInAppAlert();
             setScreen('alert');
           }
         })
@@ -378,12 +440,14 @@ function ScamShieldApp() {
     } else if (Platform.OS === 'ios' && ScamShieldPush) {
       const emitter = new NativeEventEmitter(NativeModules.ScamShieldPush);
       pushSubscription = emitter.addListener('ScamShieldScamAlert', () => {
+        showUrgentInAppAlert();
         setScreen('alert');
       });
 
       ScamShieldPush.consumePendingScamAlert()
         .then(hadPendingAlert => {
           if (mounted && hadPendingAlert) {
+            showUrgentInAppAlert();
             setScreen('alert');
           }
         })
@@ -394,49 +458,83 @@ function ScamShieldApp() {
       mounted = false;
       pushSubscription?.remove();
     };
-  }, [registerPushToken]);
+  }, [registerPushToken, showUrgentInAppAlert]);
 
   const navigation = useMemo(
     () => ({
       goToSetup: () => setScreen('setup'),
       goToProtected: () => setScreen('protected'),
       goToAlert: () => setScreen('alert'),
-      testSystemNotification,
     }),
     [],
   );
 
+  const logout = useCallback(async () => {
+    try {
+      await GoogleSignin.signOut().catch(() => undefined);
+      await AsyncStorage.multiRemove([
+        SETUP_COMPLETE_KEY,
+        USER_REGISTERED_KEY,
+        GOOGLE_SUB_KEY,
+        USER_NAME_KEY,
+        USER_PHONE_KEY,
+        TWILIO_NUMBER_KEY,
+      ]);
+    } finally {
+      didAttemptPushRegistrationRef.current = false;
+      setUrgentAlertVisible(false);
+      setPushStatus(Platform.OS === 'ios' ? 'idle' : 'unsupported');
+      setScreen('account');
+    }
+  }, []);
+
+  let content;
+
   if (isBooting) {
-    return <BootScreen />;
-  }
-
-  if (screen === 'alert') {
-    return <AlertScreen onDone={navigation.goToProtected} />;
-  }
-
-  if (screen === 'protected') {
-    return (
+    content = <BootScreen />;
+  } else if (screen === 'alert') {
+    content = (
+      <AlertScreen
+        onDone={() => {
+          setUrgentAlertVisible(false);
+          navigation.goToProtected();
+        }}
+      />
+    );
+  } else if (screen === 'protected') {
+    content = (
       <ProtectedScreen
         pushStatus={pushStatus}
-        onEnablePush={registerPushToken}
         onBackToSetup={navigation.goToSetup}
-        onTestAlert={navigation.goToAlert}
-        onTestNotification={navigation.testSystemNotification}
+        onLogout={logout}
+      />
+    );
+  } else if (screen === 'account') {
+    content = <AccountScreen onComplete={navigation.goToSetup} />;
+  } else {
+    content = (
+      <SetupScreen
+        onReady={() => {
+          navigation.goToProtected();
+          registerPushToken();
+        }}
       />
     );
   }
 
-  if (screen === 'account') {
-    return <AccountScreen onComplete={navigation.goToSetup} />;
-  }
-
   return (
-    <SetupScreen
-      onReady={() => {
-        navigation.goToProtected();
-        registerPushToken();
-      }}
-    />
+    <View style={styles.appShell}>
+      {content}
+      {urgentAlertVisible ? (
+        <UrgentAlertBanner
+          onDismiss={() => setUrgentAlertVisible(false)}
+          onOpenAlert={() => {
+            setUrgentAlertVisible(false);
+            navigation.goToAlert();
+          }}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -457,6 +555,13 @@ function AccountScreen({ onComplete }: { onComplete: () => void }) {
   const [displayName, setDisplayName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
+  const scrollViewRef = useRef<ScrollView | null>(null);
+
+  function scrollFormIntoView() {
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    });
+  }
 
   async function signInWithGoogle() {
     setIsSubmitting(true);
@@ -500,6 +605,7 @@ function AccountScreen({ onComplete }: { onComplete: () => void }) {
     setIsSubmitting(true);
 
     try {
+      assertBackendConfigured();
       const dialedPhone = normalizeDialedPhone(phoneNumber);
       const response = await fetch(`${BACKEND_HTTP_URL}/api/register`, {
         method: 'POST',
@@ -518,10 +624,7 @@ function AccountScreen({ onComplete }: { onComplete: () => void }) {
       await AsyncStorage.setItem(USER_PHONE_KEY, dialedPhone);
       onComplete();
     } catch (error) {
-      const detail =
-        error instanceof Error
-          ? error.message
-          : 'Account registration failed.';
+      const detail = describeNetworkError('Account registration', error);
       Alert.alert('Registration failed', detail);
     } finally {
       setIsSubmitting(false);
@@ -530,71 +633,84 @@ function AccountScreen({ onComplete }: { onComplete: () => void }) {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.setupContent}>
-        <View style={styles.brandRow}>
-          <View style={styles.logoMark}>
-            <Text style={styles.logoText}>S</Text>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={24}
+        style={styles.keyboardAvoider}>
+        <ScrollView
+          automaticallyAdjustKeyboardInsets
+          contentContainerStyle={[styles.setupContent, styles.accountContent]}
+          keyboardShouldPersistTaps="handled"
+          ref={scrollViewRef}>
+          <View style={styles.brandRow}>
+            <View style={styles.logoMark}>
+              <Text style={styles.logoText}>S</Text>
+            </View>
+            <Text style={styles.brandText}>ScamShield</Text>
           </View>
-          <Text style={styles.brandText}>ScamShield</Text>
-        </View>
 
-        <View style={styles.heroBlock}>
-          <Text style={styles.eyebrow}>Account Setup</Text>
-          <Text style={styles.setupTitle}>Create your protected profile.</Text>
-          <Text style={styles.setupSubtitle}>
-            Sign in once and add the phone number that Twilio forwards into
-            ScamShield. Future launches skip this step.
-          </Text>
-        </View>
-
-        <View style={styles.panel}>
-          <Text style={styles.panelLabel}>Google account</Text>
-          {email ? <Text style={styles.panelBody}>{email}</Text> : null}
-          <Pressable
-            disabled={isSubmitting}
-            onPress={signInWithGoogle}
-            style={[styles.secondaryButton, isSubmitting && styles.disabledButton]}>
-            <Text style={styles.secondaryButtonText}>
-              {googleSub ? 'Google connected' : 'Sign in with Google'}
+          <View style={styles.heroBlock}>
+            <Text style={styles.eyebrow}>Account Setup</Text>
+            <Text style={styles.setupTitle}>Protect every call that matters.</Text>
+            <Text style={styles.setupSubtitle}>
+              Stay one step ahead of scam callers with instant alerts built for
+              the people you care about most.
             </Text>
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.panelLabel}>Google account</Text>
+            {email ? <Text style={styles.panelBody}>{email}</Text> : null}
+            <Pressable
+              disabled={isSubmitting}
+              onPress={signInWithGoogle}
+              style={[styles.secondaryButton, isSubmitting && styles.disabledButton]}>
+              <Text style={styles.secondaryButtonText}>
+                {googleSub ? 'Google connected' : 'Sign in with Google'}
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.panel}>
+            <Text style={styles.panelLabel}>Your details</Text>
+            <TextInput
+              value={displayName}
+              onChangeText={setDisplayName}
+              placeholder="Full name"
+              placeholderTextColor="#6f879a"
+              style={styles.input}
+              autoCapitalize="words"
+              onFocus={scrollFormIntoView}
+              returnKeyType="next"
+            />
+            <TextInput
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              placeholder="Phone number"
+              placeholderTextColor="#6f879a"
+              style={styles.input}
+              keyboardType="phone-pad"
+              textContentType="telephoneNumber"
+              onFocus={scrollFormIntoView}
+              returnKeyType="done"
+            />
+          </View>
+
+          <Pressable
+            disabled={isSubmitting || !googleSub}
+            onPress={registerAccount}
+            style={[
+              styles.primaryButton,
+              (isSubmitting || !googleSub) && styles.disabledButton,
+            ]}>
+            {isSubmitting ? (
+              <ActivityIndicator color="#04101a" />
+            ) : (
+              <Text style={styles.primaryButtonText}>Continue</Text>
+            )}
           </Pressable>
-        </View>
-
-        <View style={styles.panel}>
-          <Text style={styles.panelLabel}>Your details</Text>
-          <TextInput
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder="Full name"
-            placeholderTextColor="#6f879a"
-            style={styles.input}
-            autoCapitalize="words"
-          />
-          <TextInput
-            value={phoneNumber}
-            onChangeText={setPhoneNumber}
-            placeholder="Phone number"
-            placeholderTextColor="#6f879a"
-            style={styles.input}
-            keyboardType="phone-pad"
-            textContentType="telephoneNumber"
-          />
-        </View>
-
-        <Pressable
-          disabled={isSubmitting || !googleSub}
-          onPress={registerAccount}
-          style={[
-            styles.primaryButton,
-            (isSubmitting || !googleSub) && styles.disabledButton,
-          ]}>
-          {isSubmitting ? (
-            <ActivityIndicator color="#04101a" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Continue</Text>
-          )}
-        </Pressable>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -618,18 +734,36 @@ function SetupScreen({ onReady }: { onReady: () => void }) {
   const [isImporting, setIsImporting] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [safeListCount, setSafeListCount] = useState<number | null>(null);
+  const [hasCompletedSetup, setHasCompletedSetup] = useState(false);
 
-  async function skipForDemo() {
-    await AsyncStorage.setItem(SETUP_COMPLETE_KEY, 'true');
-    await AsyncStorage.setItem(TWILIO_NUMBER_KEY, TWILIO_NUMBER);
-    onReady();
-  }
+  useEffect(() => {
+    Promise.all([
+      AsyncStorage.getItem(SAFE_LIST_COUNT_KEY),
+      AsyncStorage.getItem(SETUP_COMPLETE_KEY),
+    ])
+      .then(([safeListValue, setupCompleteValue]) => {
+        if (setupCompleteValue === 'true') {
+          setHasCompletedSetup(true);
+        }
+
+        if (!safeListValue) {
+          return;
+        }
+
+        const parsedValue = Number(safeListValue);
+        if (Number.isFinite(parsedValue) && parsedValue > 0) {
+          setSafeListCount(parsedValue);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   async function importContacts() {
     setIsImporting(true);
     setPermissionDenied(false);
 
     try {
+      assertBackendConfigured();
       const granted = await requestContactsPermission();
 
       if (!granted) {
@@ -658,12 +792,11 @@ function SetupScreen({ onReady }: { onReady: () => void }) {
 
       await AsyncStorage.setItem(SETUP_COMPLETE_KEY, 'true');
       await AsyncStorage.setItem(TWILIO_NUMBER_KEY, TWILIO_NUMBER);
+      await AsyncStorage.setItem(SAFE_LIST_COUNT_KEY, String(phoneNumbers.length));
+      setHasCompletedSetup(true);
       setSafeListCount(phoneNumbers.length);
     } catch (error) {
-      const detail =
-        error instanceof Error
-          ? error.message
-          : 'Contacts could not be imported right now.';
+      const detail = describeNetworkError('Contact import', error);
       Alert.alert('Setup incomplete', detail);
     } finally {
       setIsImporting(false);
@@ -687,28 +820,15 @@ function SetupScreen({ onReady }: { onReady: () => void }) {
 
         <View style={styles.heroBlock}>
           <Text style={styles.eyebrow}>Device Setup</Text>
-          <Text style={styles.setupTitle}>
-            Turn this phone into a scam alert device.
-          </Text>
+          <Text style={styles.setupTitle}>Get this phone alert-ready.</Text>
           <Text style={styles.setupSubtitle}>
-            Import trusted numbers once, forward calls to your demo line, and keep
-            ScamShield open while protection stays active.
+            Add your trusted contacts, turn on call forwarding, and let
+            ScamShield step in when something feels off.
           </Text>
-        </View>
-
-        <View style={styles.highlightStrip}>
-          <View style={styles.highlightItem}>
-            <Text style={styles.highlightValue}>1x</Text>
-            <Text style={styles.highlightLabel}>contact import</Text>
-          </View>
-          <View style={styles.highlightItem}>
-            <Text style={styles.highlightValue}>24/7</Text>
-            <Text style={styles.highlightLabel}>alert readiness</Text>
-          </View>
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelLabel}>Forwarding number</Text>
+          <Text style={styles.panelLabel}>Your forwarding number</Text>
           <View style={styles.numberRow}>
             <Text style={styles.numberText}>{TWILIO_NUMBER}</Text>
             <Pressable onPress={copyNumber} style={styles.copyButton}>
@@ -718,52 +838,54 @@ function SetupScreen({ onReady }: { onReady: () => void }) {
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelLabel}>Call forwarding</Text>
-          <Text style={styles.stepText}>1. Open your phone dialer</Text>
+          <Text style={styles.panelLabel}>Turn on forwarding</Text>
+          <Text style={styles.stepText}>1. Open your Phone app</Text>
           <Text style={styles.stepText}>
-            2. Dial *72 followed by your Twilio number
+            2. Dial `*72` followed by the forwarding number above
           </Text>
           <Text style={styles.stepText}>
             3. Press call and wait for the confirmation tone
           </Text>
           <Text style={styles.stepText}>
-            4. Hang up because forwarding is now active
+            4. Hang up once forwarding is active
           </Text>
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelLabel}>Trusted contacts</Text>
+          <Text style={styles.panelLabel}>Import trusted contacts</Text>
           <Text style={styles.panelBody}>
-            ScamShield reads phone numbers only, normalizes them, removes
-            duplicates, and sends the final list to your backend safe list.
+            ScamShield only uses phone numbers here, then cleans and uploads the
+            final list so familiar callers are treated as safe.
           </Text>
           {permissionDenied ? (
             <Text style={styles.warningText}>
-              Contacts permission is required before ScamShield can protect this
-              device correctly.
+              Contact access is required before ScamShield can finish protecting
+              this device.
             </Text>
           ) : null}
           {safeListCount !== null ? (
             <Text style={styles.successText}>
-              {safeListCount} trusted numbers imported.
+              {safeListCount} trusted numbers are ready.
+            </Text>
+          ) : hasCompletedSetup ? (
+            <Text style={styles.successText}>
+              Trusted contacts are already connected.
             </Text>
           ) : null}
-          <Pressable
-            disabled={isImporting}
-            onPress={importContacts}
-            style={[styles.primaryButton, isImporting && styles.disabledButton]}>
-            {isImporting ? (
-              <ActivityIndicator color="#04101a" />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {permissionDenied
-                  ? 'Try again'
-                  : safeListCount !== null
-                    ? 'Re-import contacts'
-                    : 'Import contacts'}
-              </Text>
-            )}
-          </Pressable>
+          {safeListCount === null ? (
+            <Pressable
+              disabled={isImporting}
+              onPress={importContacts}
+              style={[styles.primaryButton, isImporting && styles.disabledButton]}>
+              {isImporting ? (
+                <ActivityIndicator color="#04101a" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {permissionDenied ? 'Try again' : 'Import contacts'}
+                </Text>
+              )}
+            </Pressable>
+          ) : null}
           {permissionDenied ? (
             <Pressable onPress={Linking.openSettings} style={styles.textButton}>
               <Text style={styles.textButtonText}>Open Settings</Text>
@@ -772,14 +894,13 @@ function SetupScreen({ onReady }: { onReady: () => void }) {
         </View>
 
         <Pressable
-          disabled={safeListCount === null}
+          disabled={!hasCompletedSetup && safeListCount === null}
           onPress={onReady}
-          style={[styles.readyButton, safeListCount === null && styles.disabledButton]}>
-          <Text style={styles.readyButtonText}>I'm ready</Text>
-        </Pressable>
-
-        <Pressable onPress={skipForDemo} style={styles.demoButton}>
-          <Text style={styles.demoButtonText}>Skip for demo</Text>
+          style={[
+            styles.readyButton,
+            !hasCompletedSetup && safeListCount === null && styles.disabledButton,
+          ]}>
+          <Text style={styles.readyButtonText}>Start protection</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -788,16 +909,12 @@ function SetupScreen({ onReady }: { onReady: () => void }) {
 
 function ProtectedScreen({
   pushStatus,
-  onEnablePush,
   onBackToSetup,
-  onTestAlert,
-  onTestNotification,
+  onLogout,
 }: {
   pushStatus: PushStatus;
-  onEnablePush: () => void;
   onBackToSetup: () => void;
-  onTestAlert: () => void;
-  onTestNotification: () => void;
+  onLogout: () => void;
 }) {
   const pushLabel =
     pushStatus === 'registered'
@@ -821,8 +938,8 @@ function ProtectedScreen({
           : pushStatus === 'unsupported'
             ? 'Push alerts are unavailable on this platform.'
             : pushStatus === 'failed'
-              ? 'Check the backend URL, then tap Enable push again.'
-              : 'Tap Enable push to register this device with the backend.';
+              ? 'Check the backend URL, then reopen setup if registration needs to run again.'
+              : 'Push registration has not completed yet.';
 
   return (
     <SafeAreaView style={styles.protectedScreen}>
@@ -832,33 +949,38 @@ function ProtectedScreen({
         <View style={styles.protectedHeader}>
           <View>
             <Text style={styles.eyebrow}>Alert Readiness</Text>
-            <Text style={styles.protectedTitle}>Call protected</Text>
-          </View>
-          <View style={styles.statusPill}>
-            <View
-              style={[
-                styles.statusDot,
-                pushStatus === 'registered'
-                  ? styles.readyDot
-                  : styles.waitingDot,
-              ]}
-            />
-            <Text style={styles.statusText}>{pushLabel}</Text>
+            <Text style={styles.protectedTitle}>Protection is live.</Text>
           </View>
         </View>
 
         <View style={styles.heroCard}>
-          <View style={styles.shieldFrame}>
-            <View style={styles.shieldCore}>
-              <Text style={styles.shieldText}>S</Text>
+          <View style={styles.protectedHeroRow}>
+            <View style={styles.protectedBadge}>
+              <Text style={styles.protectedBadgeText}>Shield Active</Text>
+            </View>
+            <View style={styles.signalStack}>
+              <View style={styles.signalBarShort} />
+              <View style={styles.signalBarMid} />
+              <View style={styles.signalBarTall} />
             </View>
           </View>
 
-          <Text style={styles.protectedMessage}>ScamShield is standing by.</Text>
+          <Text style={styles.protectedMessage}>This phone is watching for risk.</Text>
           <Text style={styles.protectedBody}>
-            Scam alerts arrive through push notifications when this app is in the
-            background. Local testing still works with the test button below.
+            If a call starts to look suspicious, ScamShield sends an urgent alert
+            right away so you can act before it gets worse.
           </Text>
+
+          <View style={styles.protectedStatsRow}>
+            <View style={styles.protectedStatCard}>
+              <Text style={styles.protectedStatLabel}>Mode</Text>
+              <Text style={styles.protectedStatValue}>Active</Text>
+            </View>
+            <View style={styles.protectedStatCard}>
+              <Text style={styles.protectedStatLabel}>Alerts</Text>
+              <Text style={styles.protectedStatValue}>Instant</Text>
+            </View>
+          </View>
         </View>
 
         <View style={styles.statePanel}>
@@ -868,21 +990,45 @@ function ProtectedScreen({
         </View>
 
         <View style={styles.footerActions}>
-          <Pressable onPress={onTestAlert} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Test alert</Text>
-          </Pressable>
-          <Pressable onPress={onTestNotification} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Test notification</Text>
-          </Pressable>
-          <Pressable onPress={onEnablePush} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Enable push</Text>
-          </Pressable>
           <Pressable onPress={onBackToSetup} style={styles.secondaryButton}>
             <Text style={styles.secondaryButtonText}>Setup</Text>
+          </Pressable>
+          <Pressable onPress={onLogout} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Logout</Text>
           </Pressable>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function UrgentAlertBanner({
+  onDismiss,
+  onOpenAlert,
+}: {
+  onDismiss: () => void;
+  onOpenAlert: () => void;
+}) {
+  return (
+    <View pointerEvents="box-none" style={styles.urgentOverlay}>
+      <View style={styles.urgentBanner}>
+        <View style={styles.urgentBeacon} />
+        <Text style={styles.urgentEyebrow}>ScamShield Emergency Alert</Text>
+        <Text style={styles.urgentTitle}>SCAM DETECTED</Text>
+        <Text style={styles.urgentMessage}>Hang up now.</Text>
+        <Text style={styles.urgentBody}>
+          This call was flagged as high risk. End the call immediately.
+        </Text>
+        <View style={styles.urgentActions}>
+          <Pressable onPress={onOpenAlert} style={styles.urgentPrimaryButton}>
+            <Text style={styles.urgentPrimaryText}>Open full alert</Text>
+          </Pressable>
+          <Pressable onPress={onDismiss} style={styles.urgentSecondaryButton}>
+            <Text style={styles.urgentSecondaryText}>I've hung up</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -921,9 +1067,15 @@ function AlertScreen({ onDone }: { onDone: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  appShell: {
+    flex: 1,
+  },
   screen: {
     flex: 1,
     backgroundColor: '#FAF8F2',
+  },
+  keyboardAvoider: {
+    flex: 1,
   },
   loadingScreen: {
     flex: 1,
@@ -963,6 +1115,9 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 36,
     gap: 18,
+  },
+  accountContent: {
+    paddingBottom: 180,
   },
   brandRow: {
     flexDirection: 'row',
@@ -1010,29 +1165,6 @@ const styles = StyleSheet.create({
     color: '#57534E',
     fontSize: 16,
     lineHeight: 24,
-  },
-  highlightStrip: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  highlightItem: {
-    flex: 1,
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-    backgroundColor: '#284426',
-  },
-  highlightValue: {
-    color: '#FAF8F2',
-    fontSize: 24,
-    fontWeight: '900',
-  },
-  highlightLabel: {
-    color: '#D6E3D4',
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    marginTop: 6,
   },
   panel: {
     borderRadius: 22,
@@ -1211,7 +1343,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   heroCard: {
-    alignItems: 'center',
     borderRadius: 28,
     paddingHorizontal: 24,
     paddingVertical: 28,
@@ -1224,29 +1355,86 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
     elevation: 3,
   },
-  shieldFrame: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    marginBottom: 24,
+  protectedHeroRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E3EDE1',
+    justifyContent: 'space-between',
+    gap: 16,
+    marginBottom: 18,
+  },
+  protectedBadge: {
+    flex: 1,
+    minHeight: 104,
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    backgroundColor: '#F4F8F3',
     borderWidth: 1,
     borderColor: '#C5D9C2',
-  },
-  shieldCore: {
-    width: 148,
-    height: 148,
-    borderRadius: 74,
-    alignItems: 'center',
     justifyContent: 'center',
+  },
+  protectedBadgeText: {
+    color: '#284426',
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '900',
+  },
+  signalStack: {
+    width: 92,
+    minHeight: 104,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#213821',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  signalBarShort: {
+    width: 12,
+    height: 26,
+    borderRadius: 999,
+    backgroundColor: '#9DBF99',
+  },
+  signalBarMid: {
+    width: 12,
+    height: 44,
+    borderRadius: 999,
+    backgroundColor: '#6FA06A',
+  },
+  signalBarTall: {
+    width: 12,
+    height: 66,
+    borderRadius: 999,
     backgroundColor: '#4E844A',
   },
-  shieldText: {
-    color: '#FFFFFF',
-    fontSize: 72,
-    fontWeight: '900',
+  protectedStatsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  protectedStatCard: {
+    flex: 1,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FAF8F2',
+    borderWidth: 1,
+    borderColor: '#E7E1D5',
+  },
+  protectedStatLabel: {
+    color: '#78716C',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  protectedStatValue: {
+    color: '#1F2A1F',
+    fontSize: 18,
+    fontWeight: '800',
   },
   protectedMessage: {
     color: '#1F2A1F',
@@ -1299,6 +1487,98 @@ const styles = StyleSheet.create({
     color: '#30542E',
     fontSize: 16,
     fontWeight: '800',
+  },
+  urgentOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    justifyContent: 'flex-start',
+    paddingHorizontal: 14,
+    paddingTop: 18,
+    zIndex: 1000,
+    elevation: 1000,
+  },
+  urgentBanner: {
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingVertical: 22,
+    backgroundColor: '#E0001B',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#7F1D1D',
+    shadowOpacity: 0.45,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 24,
+  },
+  urgentBeacon: {
+    position: 'absolute',
+    top: 18,
+    right: 18,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+  },
+  urgentEyebrow: {
+    color: '#FFE4E6',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  urgentTitle: {
+    color: '#FFFFFF',
+    fontSize: 38,
+    lineHeight: 42,
+    fontWeight: '900',
+    marginTop: 8,
+  },
+  urgentMessage: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: '900',
+    marginTop: 8,
+  },
+  urgentBody: {
+    color: '#FFE4E6',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  urgentActions: {
+    gap: 10,
+    marginTop: 18,
+  },
+  urgentPrimaryButton: {
+    minHeight: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  urgentPrimaryText: {
+    color: '#B00016',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  urgentSecondaryButton: {
+    minHeight: 50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+  },
+  urgentSecondaryText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
   },
   alertScreen: {
     flex: 1,

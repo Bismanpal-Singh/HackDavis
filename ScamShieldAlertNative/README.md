@@ -14,12 +14,13 @@ This is a clean React Native CLI app for the ScamShield alert-device demo. It do
 
 ## Configure
 
-Update the constants at the top of `App.tsx`:
+Update the forwarding number at the top of `App.tsx`:
 
 ```ts
 const TWILIO_NUMBER = '(855) 555-0199';
-const BACKEND_HTTP_URL = 'https://your-cloudflare-or-ngrok-url';
 ```
+
+The mobile app reads `PUBLIC_BASE_URL` from `backend/.env` and writes it into `backend.config.ts` automatically before `ios`, `android`, `start`, `lint`, and `test`.
 
 Google Sign-In is configured from the Firebase Android app. If you use a Web OAuth client, put its client ID here too:
 

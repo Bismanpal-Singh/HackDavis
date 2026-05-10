@@ -75,3 +75,6 @@ ios/GoogleService-Info.plist
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Local app config
+backend.config.ts

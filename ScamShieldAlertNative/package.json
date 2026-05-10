@@ -3,6 +3,12 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
+    "preandroid": "npm run sync-backend-url",
+    "preios": "npm run sync-backend-url",
+    "prelint": "npm run sync-backend-url",
+    "prestart": "npm run sync-backend-url",
+    "pretest": "npm run sync-backend-url",
+    "sync-backend-url": "node scripts/sync-backend-config.js",
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
