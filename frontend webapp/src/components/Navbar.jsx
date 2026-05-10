@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import ShieldLogo from './ShieldLogo'
 
@@ -28,12 +29,10 @@ export default function Navbar() {
     >
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         {/* Logo */}
-        <a href="/" className="flex items-center gap-2.5 group">
+        <Link to="/" className="flex items-center gap-2.5">
           <ShieldLogo size={30} />
-          <span className="text-lg font-800 font-extrabold text-sage-800 tracking-tight">
-            ScamShield
-          </span>
-        </a>
+          <span className="text-lg font-extrabold text-sage-800 tracking-tight">ScamShield</span>
+        </Link>
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-8">
@@ -50,18 +49,18 @@ export default function Navbar() {
 
         {/* Desktop actions */}
         <div className="hidden md:flex items-center gap-3">
-          <a
-            href="/login"
+          <Link
+            to="/login"
             className="text-sm font-semibold text-stone-600 hover:text-sage-700 transition-colors px-4 py-2"
           >
             Log in
-          </a>
-          <a
-            href="/signup"
+          </Link>
+          <Link
+            to="/signup"
             className="text-sm font-semibold bg-sage-500 hover:bg-sage-600 text-white px-5 py-2.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
           >
             Get Started
-          </a>
+          </Link>
         </div>
 
         {/* Mobile menu button */}
@@ -88,15 +87,16 @@ export default function Navbar() {
             </a>
           ))}
           <div className="flex flex-col gap-2 pt-2 border-t border-sage-100">
-            <a href="/login" className="text-sm font-semibold text-stone-600 py-2">
+            <Link to="/login" className="text-sm font-semibold text-stone-600 py-2">
               Log in
-            </a>
-            <a
-              href="/signup"
+            </Link>
+            <Link
+              to="/signup"
               className="text-sm font-semibold bg-sage-500 text-white px-5 py-2.5 rounded-full text-center"
+              onClick={() => setMenuOpen(false)}
             >
               Get Started
-            </a>
+            </Link>
           </div>
         </div>
       )}

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import ShieldLogo from './ShieldLogo'
 
 export default function Footer() {
@@ -13,9 +14,9 @@ export default function Footer() {
 
           {/* Links */}
           <div className="flex items-center gap-6 text-xs text-stone-400 font-medium">
-            <a href="/privacy" className="hover:text-stone-600 transition-colors">Privacy</a>
-            <a href="/terms" className="hover:text-stone-600 transition-colors">Terms</a>
-            <a href="/contact" className="hover:text-stone-600 transition-colors">Contact</a>
+            <Link to="/privacy" className="hover:text-stone-600 transition-colors">Privacy</Link>
+            <Link to="/terms" className="hover:text-stone-600 transition-colors">Terms</Link>
+            <Link to="/contact" className="hover:text-stone-600 transition-colors">Contact</Link>
           </div>
 
           {/* Tagline */}

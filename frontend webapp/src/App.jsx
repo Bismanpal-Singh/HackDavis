@@ -1,3 +1,5 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { GoogleOAuthProvider } from '@react-oauth/google'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
 import TrustStrip from './components/TrustStrip'
@@ -7,10 +9,11 @@ import StatsSection from './components/StatsSection'
 import ForFamilies from './components/ForFamilies'
 import CTASection from './components/CTASection'
 import Footer from './components/Footer'
+import AuthPage from './pages/AuthPage'
 
-export default function App() {
+function LandingPage() {
   return (
-    <div className="min-h-screen font-sans">
+    <>
       <Navbar />
       <Hero />
       <TrustStrip />
@@ -20,6 +23,22 @@ export default function App() {
       <ForFamilies />
       <CTASection />
       <Footer />
-    </div>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || ''}>
+      <BrowserRouter>
+        <div className="min-h-screen font-sans">
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<AuthPage />} />
+            <Route path="/signup" element={<AuthPage />} />
+          </Routes>
+        </div>
+      </BrowserRouter>
+    </GoogleOAuthProvider>
   )
 }
