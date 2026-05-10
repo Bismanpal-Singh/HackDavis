@@ -11,6 +11,7 @@ from app.mongo_store import mongo_store
 from app.push_notifier import push_notifier
 from app.rule_scorer import RuleScorer
 from app.session_store import SessionState
+from app.twilio_alerter import inject_warning
 
 logger = logging.getLogger("scamshield")
 
@@ -47,4 +48,5 @@ def process_transcript_chunk(
     mongo_store.update_session(session)
     if response.alert:
         push_notifier.send_scam_alert(session)
+        inject_warning(session)
     return response
