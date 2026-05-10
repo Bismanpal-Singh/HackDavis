@@ -1,24 +1,24 @@
 import { motion } from 'framer-motion'
-import { PhoneIncoming, ScanLine, BellRing } from 'lucide-react'
+import { PhoneForwarded, AudioWaveform, ShieldAlert } from 'lucide-react'
 
 const steps = [
   {
-    icon: PhoneIncoming,
+    icon: PhoneForwarded,
     step: '01',
-    title: 'Receive a suspicious call',
-    desc: 'Put your phone on speaker and open ScamShield. Tap "Protect This Call" — setup takes under 5 seconds.',
+    title: 'Call intercepted automatically',
+    desc: "Your loved one's phone number is routed through ScamShield. When a call comes in, it's forwarded to their real phone while our system silently listens — no app to open, nothing to tap.",
   },
   {
-    icon: ScanLine,
+    icon: AudioWaveform,
     step: '02',
-    title: 'AI listens in real time',
-    desc: 'ScamShield transcribes the call live and runs it through our rule-based scorer and Claude AI to detect fraud patterns.',
+    title: 'Both sides analyzed in real time',
+    desc: "Deepgram transcribes both the caller and recipient live. A rule-based scorer flags phrases like 'gift card', 'wire transfer', or 'IRS' — then Claude AI cross-checks the full conversation for fraud patterns.",
   },
   {
-    icon: BellRing,
+    icon: ShieldAlert,
     step: '03',
-    title: 'Get alerted instantly',
-    desc: 'If a scam is detected, you see a visual alert, hear a voice warning, and your trusted family contact is notified.',
+    title: 'Warning issued, family notified',
+    desc: 'When a scam is confirmed, a voice warning plays directly into your loved one\'s ear. Family members get an instant push notification, and the full call report is logged to your dashboard.',
   },
 ]
 
@@ -44,7 +44,7 @@ export default function HowItWorks() {
             Protection in three steps
           </h2>
           <p className="text-stone-500 max-w-md mx-auto text-base leading-relaxed">
-            No complicated setup, no technical knowledge required. ScamShield works the moment you open it.
+            Fully automatic — ScamShield intercepts, analyzes, and alerts without any action from your loved one.
           </p>
         </div>
 

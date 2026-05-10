@@ -21,7 +21,7 @@ export default function Footer() {
 
           {/* Tagline */}
           <p className="text-xs text-stone-400">
-            Built for HackDavis 2025 &nbsp;·&nbsp; Protecting families, one call at a time.
+            Built for HackDavis 2026 &nbsp;·&nbsp; Protecting families, one call at a time.
           </p>
         </div>
       </div>

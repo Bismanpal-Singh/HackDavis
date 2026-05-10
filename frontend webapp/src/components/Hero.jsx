@@ -60,117 +60,121 @@ function PhoneMockup() {
   return (
     <div className="relative flex justify-center items-center py-10">
       {/* Ambient glow */}
-      <div className="absolute w-[28rem] h-[28rem] bg-sage-200 rounded-full blur-3xl opacity-30 pointer-events-none" />
+      <div className="absolute w-[32rem] h-[32rem] bg-sage-200 rounded-full blur-3xl opacity-30 pointer-events-none" />
 
-      {/* Phone shell */}
-      <div className="relative w-72 bg-white rounded-[2.75rem] shadow-card border border-stone-100 overflow-hidden">
-        {/* Notch */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-7 bg-stone-900 rounded-b-2xl z-10" />
+      {/* Phone shell — outer wrapper for badge positioning, no overflow-hidden */}
+      <div className="relative w-80 bg-white rounded-[3rem] shadow-card border border-stone-100">
 
-        {/* Header */}
-        <div className="bg-stone-50 px-6 pt-9 pb-5">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-semibold text-stone-400">9:41</span>
-            <span className="text-xs font-semibold text-stone-400">●●● ▲</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-sage-100 rounded-full flex items-center justify-center shrink-0">
-              <PhoneCall size={20} className="text-sage-600" />
+        {/* Inner content area with overflow-hidden so notch clips correctly */}
+        <div className="overflow-hidden rounded-[3rem]">
+          {/* Notch */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-7 bg-stone-900 rounded-b-2xl z-10" />
+
+          {/* Header */}
+          <div className="bg-stone-50 px-7 pt-10 pb-5">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-xs font-semibold text-stone-400">9:41</span>
+              <span className="text-xs font-semibold text-stone-400">●●● ▲</span>
             </div>
-            <div>
-              <p className="text-sm font-bold text-stone-800">Unknown Caller</p>
-              <p className="text-xs text-stone-400 font-medium mt-0.5">+1 (555) 000-0000 · 0:43</p>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-sage-100 rounded-full flex items-center justify-center shrink-0">
+                <PhoneCall size={22} className="text-sage-600" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-stone-800">Unknown Caller</p>
+                <p className="text-xs text-stone-400 font-medium mt-0.5">+1 (555) 000-0000 · 0:43</p>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Risk score section */}
-        <div className="px-6 pt-5 pb-4 bg-white">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-stone-400 uppercase tracking-widest">Scam Risk Score</span>
-            <motion.span
-              key={cur.label}
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className={`text-xs font-bold px-2.5 py-1 rounded-full border ${cur.labelBg} ${cur.labelColor}`}
-            >
-              {cur.label}
-            </motion.span>
+          {/* Risk score section */}
+          <div className="px-7 pt-5 pb-4 bg-white">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-stone-400 uppercase tracking-widest">Scam Risk Score</span>
+              <motion.span
+                key={cur.label}
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className={`text-xs font-bold px-2.5 py-1 rounded-full border ${cur.labelBg} ${cur.labelColor}`}
+              >
+                {cur.label}
+              </motion.span>
+            </div>
+
+            {/* Big number */}
+            <div className="flex items-end gap-1.5 mb-4">
+              <span className="text-6xl font-extrabold text-stone-900 leading-none tabular-nums">
+                <ScoreCounter key={phase} target={cur.score} duration={phase === 0 ? 0.4 : 1.5} />
+              </span>
+              <span className="text-2xl font-bold text-stone-300 mb-1.5">/100</span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-4 bg-stone-100 rounded-full overflow-hidden">
+              <motion.div
+                className={`h-full bg-gradient-to-r ${cur.bar} rounded-full`}
+                animate={{ width: cur.pct }}
+                transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
+              />
+            </div>
+            <div className="flex justify-between mt-2 px-0.5">
+              {[0, 25, 50, 75, 100].map((v) => (
+                <span key={v} className="text-[10px] text-stone-300 font-medium">{v}</span>
+              ))}
+            </div>
           </div>
 
-          {/* Big number */}
-          <div className="flex items-end gap-1.5 mb-4">
-            <span className="text-6xl font-extrabold text-stone-900 leading-none tabular-nums">
-              <ScoreCounter key={phase} target={cur.score} duration={phase === 0 ? 0.4 : 1.5} />
-            </span>
-            <span className="text-2xl font-bold text-stone-300 mb-1.5">/100</span>
-          </div>
-
-          {/* Progress bar */}
-          <div className="h-4 bg-stone-100 rounded-full overflow-hidden">
+          {/* Alert card */}
+          <div className="px-5 pb-2">
             <motion.div
-              className={`h-full bg-gradient-to-r ${cur.bar} rounded-full`}
-              animate={{ width: cur.pct }}
-              transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
-            />
+              animate={{ opacity: showAlert ? 1 : 0, y: showAlert ? 0 : 8, scale: showAlert ? 1 : 0.96 }}
+              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3.5"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <ShieldLogo size={15} />
+                <span className="text-xs font-extrabold text-red-600">Scam Detected</span>
+              </div>
+              <p className="text-[11px] text-red-500 font-semibold">IRS Impersonation · Confidence 87%</p>
+            </motion.div>
           </div>
-          <div className="flex justify-between mt-2 px-0.5">
-            {[0, 25, 50, 75, 100].map((v) => (
-              <span key={v} className="text-[10px] text-stone-300 font-medium">{v}</span>
-            ))}
+
+          {/* Action button */}
+          <div className="px-5 pt-2 pb-8">
+            <motion.button
+              animate={{
+                backgroundColor: showAlert ? '#ef4444' : '#e7e5e4',
+                color: showAlert ? '#ffffff' : '#78716c',
+              }}
+              transition={{ duration: 0.35 }}
+              className="w-full text-xs font-bold py-3 rounded-2xl"
+            >
+              {showAlert ? '⚠ Hang Up Now' : 'End Call'}
+            </motion.button>
           </div>
         </div>
 
-        {/* Alert card */}
-        <div className="px-5 pb-2">
-          <motion.div
-            animate={{ opacity: showAlert ? 1 : 0, y: showAlert ? 0 : 8, scale: showAlert ? 1 : 0.96 }}
-            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-            className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3.5"
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <ShieldLogo size={15} />
-              <span className="text-xs font-extrabold text-red-600">Scam Detected</span>
-            </div>
-            <p className="text-[11px] text-red-500 font-semibold">IRS Impersonation · Confidence 87%</p>
-          </motion.div>
-        </div>
+        {/* Badges — absolute inside phone shell, won't overflow */}
+        <motion.div
+          className="absolute top-5 right-5 bg-white shadow-card border border-sage-100 rounded-2xl px-3 py-2 flex items-center gap-2 z-20"
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 1.0, duration: 0.5 }}
+        >
+          <ShieldCheck size={15} className="text-sage-500" />
+          <span className="text-xs font-semibold text-stone-700">Protected</span>
+        </motion.div>
 
-        {/* Action button */}
-        <div className="px-5 pt-2 pb-7">
-          <motion.button
-            animate={{
-              backgroundColor: showAlert ? '#ef4444' : '#e7e5e4',
-              color: showAlert ? '#ffffff' : '#78716c',
-            }}
-            transition={{ duration: 0.35 }}
-            className="w-full text-xs font-bold py-3 rounded-2xl"
-          >
-            {showAlert ? '⚠ Hang Up Now' : 'End Call'}
-          </motion.button>
-        </div>
+        <motion.div
+          className="absolute bottom-16 left-5 bg-white shadow-card border border-sage-100 rounded-2xl px-3 py-2 flex items-center gap-2 z-20"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 1.3, duration: 0.5 }}
+        >
+          <Zap size={14} className="text-amber-500" />
+          <span className="text-xs font-semibold text-stone-700">AI Analyzing</span>
+        </motion.div>
       </div>
-
-      {/* Floating badges */}
-      <motion.div
-        className="absolute -right-2 top-16 bg-white shadow-card border border-sage-100 rounded-2xl px-3 py-2 flex items-center gap-2"
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 1.0, duration: 0.5 }}
-      >
-        <ShieldCheck size={15} className="text-sage-500" />
-        <span className="text-xs font-semibold text-stone-700">Protected</span>
-      </motion.div>
-
-      <motion.div
-        className="absolute -left-4 bottom-20 bg-white shadow-card border border-sage-100 rounded-2xl px-3 py-2 flex items-center gap-2"
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 1.3, duration: 0.5 }}
-      >
-        <Zap size={14} className="text-amber-500" />
-        <span className="text-xs font-semibold text-stone-700">AI Analyzing</span>
-      </motion.div>
     </div>
   )
 }
@@ -201,7 +205,7 @@ export default function Hero() {
             variants={fadeUp} initial="hidden" animate="show" custom={2}
             className="text-lg text-stone-500 leading-relaxed mb-8 max-w-md"
           >
-            ScamShield scores every call in real time using AI, and alerts you the moment a scam is detected — keeping you and your family safe before a dollar is lost.
+            ScamShield scores every call in real time using AI, and alerts you the moment a scam is detected, keeping you and your family safe before a dollar is lost.
           </motion.p>
 
           <motion.div
@@ -212,7 +216,7 @@ export default function Hero() {
               href="/signup"
               className="bg-sage-500 hover:bg-sage-600 text-white font-semibold px-7 py-3.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md text-sm"
             >
-              Get Started — It's Free
+              Get Started, It's Free
             </a>
             <a
               href="#how-it-works"

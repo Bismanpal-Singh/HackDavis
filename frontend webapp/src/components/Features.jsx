@@ -13,13 +13,13 @@ const features = [
   {
     icon: Brain,
     title: 'AI-Powered Analysis',
-    desc: 'Claude AI cross-references the transcript against 20+ FTC-documented scam scripts, classifying type, confidence, and flagged phrases.',
+    desc: 'Claude AI analyzes the live transcript to classify scam type, confidence level, and flag the exact phrases driving the risk score.',
     color: 'bg-violet-50 text-violet-600 border-violet-100',
   },
   {
     icon: AlertTriangle,
     title: 'Instant Alert',
-    desc: 'When a scam is confirmed, the screen flashes red, flagged phrases are highlighted, and an ElevenLabs voice warning plays immediately.',
+    desc: 'When a scam is confirmed, a voice warning plays directly into your loved one\'s ear via Twilio, and flagged phrases are highlighted in the call report.',
     color: 'bg-red-50 text-red-500 border-red-100',
   },
   {
@@ -37,7 +37,7 @@ const features = [
   {
     icon: Flag,
     title: 'One-Tap FTC Report',
-    desc: "File a scam complaint directly from your report with a single tap — opens a pre-filled FTC form so you're done in seconds.",
+    desc: 'File a scam complaint with one tap — opens the FTC\'s official reporting page directly from your call report.',
     color: 'bg-orange-50 text-orange-500 border-orange-100',
   },
 ]
