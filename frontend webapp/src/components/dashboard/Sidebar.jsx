@@ -1,4 +1,4 @@
-import { LayoutDashboard, PhoneCall, Users, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, PhoneCall, Users, Settings, LogOut, GraduationCap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import ShieldLogo from '../ShieldLogo'
 
@@ -14,6 +14,7 @@ function getUser() {
 const navItems = [
   { id: 'overview', label: 'Overview',     icon: LayoutDashboard },
   { id: 'history',  label: 'Call History', icon: PhoneCall },
+  { id: 'academy',  label: 'Academy',      icon: GraduationCap },
   { id: 'family',   label: 'Family',       icon: Users },
   { id: 'settings', label: 'Settings',     icon: Settings },
 ]

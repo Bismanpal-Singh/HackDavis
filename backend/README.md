@@ -20,6 +20,10 @@ backend/
     decision_engine.py
     report_builder.py
     mongo_store.py
+    academy_scenarios.py
+    academy_store.py
+    academy_routes.py
+    elevenlabs_tts.py
     detection_pipeline.py
     public_url.py
     twilio_stream.py
@@ -118,6 +122,12 @@ Endpoints:
 - Twilio Media Stream WebSocket: `wss://<PUBLIC_BASE_URL>/twilio/media` (opened by Twilio; do not call from browser)
 - Report: `GET http://localhost:8000/report/{session_id}`
 - Debug sessions: `GET http://localhost:8000/debug/sessions`
+- Academy scenario list: `GET http://localhost:8000/academy/scenarios`
+- Academy scenario detail: `GET http://localhost:8000/academy/scenarios/{scenario_id}?language=en`
+- Academy submit attempt: `POST http://localhost:8000/academy/attempt`
+- Academy stats: `GET http://localhost:8000/academy/stats?user_id=anonymous`
+- Academy scenario audio (MP3): `POST http://localhost:8000/academy/audio/scenario`
+- Academy feedback audio (MP3): `POST http://localhost:8000/academy/audio/feedback`
 
 ## Docker
 
@@ -233,6 +243,68 @@ python scripts/test_backend_ws.py
 ```
 
 7. Check MongoDB Atlas for documents in `scamshield.call_sessions`.
+
+## Academy Audio Curl Tests
+
+```bash
+curl -X POST http://localhost:8000/academy/audio/scenario \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"ssa_gift_card_001","language":"en","voice_mode":"scammer_simulation"}' \
+  --output academy_scenario.mp3
+```
+
+```bash
+curl -X POST http://localhost:8000/academy/audio/feedback \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","score":80,"feedback":"Good job. You identified the main red flags.","safe_action":"Hang up and verify through official channels."}' \
+  --output academy_feedback.mp3
+```
+
+## Academy Testing
+
+Commands:
+
+Start backend:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Run full Academy test:
+
+```bash
+python scripts/test_all_academy.py
+```
+
+Run only flow test:
+
+```bash
+python scripts/test_academy_flow.py
+```
+
+Run only audio test:
+
+```bash
+python scripts/test_academy_audio.py
+```
+
+Run only dataset test:
+
+```bash
+python scripts/test_academy_dataset.py
+```
+
+If testing through Cloudflared:
+
+```bash
+ACADEMY_TEST_BASE_URL=https://your-url.trycloudflare.com python scripts/test_all_academy.py
+```
+
+Expected:
+
+- Flow test should pass
+- Audio test should either generate MP3 or gracefully report ElevenLabs unavailable
+- Dataset test should show public dataset count if `ACADEMY_USE_HF_DATASET=true`
 
 ## Test Script
 

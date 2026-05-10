@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
+from app.academy_routes import academy_router
 from app.config import settings
 
 
@@ -35,6 +36,7 @@ rule_scorer = RuleScorer()
 decision_engine = DecisionEngine()
 
 app.include_router(create_twilio_router(rule_scorer, decision_engine))
+app.include_router(academy_router)
 
 
 @app.get("/health")
@@ -209,6 +211,9 @@ async def startup_event() -> None:
     logger.info("TWILIO_CONFIGURED=%s", str(settings.TWILIO_CONFIGURED).lower())
     logger.info("DEEPGRAM_CONFIGURED=%s", str(settings.DEEPGRAM_CONFIGURED).lower())
     logger.info("FIREBASE_CONFIGURED=%s", str(settings.FIREBASE_CONFIGURED).lower())
+    logger.info("ACADEMY_USE_HF_DATASET=%s", str(settings.ACADEMY_USE_HF_DATASET).lower())
+    logger.info("ACADEMY_HF_DATASET_NAME=%s", settings.ACADEMY_HF_DATASET_NAME)
+    logger.info("ACADEMY_MAX_DATASET_SCENARIOS=%d", settings.ACADEMY_MAX_DATASET_SCENARIOS)
     logger.info("PUBLIC_BASE_URL set=%s", str(bool((settings.PUBLIC_BASE_URL or "").strip())).lower())
     logger.info("Mongo persistence %s", "enabled" if mongo_store.is_enabled() else "disabled")
     logger.info("Mock Claude %s", "enabled" if settings.MOCK_CLAUDE else "disabled")

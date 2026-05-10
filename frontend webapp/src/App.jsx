@@ -38,6 +38,7 @@ export default function App() {
             <Route path="/login" element={<AuthPage />} />
             <Route path="/signup" element={<AuthPage />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/academy" element={<Dashboard initialPage="academy" />} />
           </Routes>
         </div>
       </BrowserRouter>

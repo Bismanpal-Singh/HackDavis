@@ -74,6 +74,18 @@ class Settings:
     PUBLIC_BASE_URL: str = os.environ.get("PUBLIC_BASE_URL", "")
     DEEPGRAM_API_KEY: str = os.environ.get("DEEPGRAM_API_KEY", "")
     FIREBASE_SERVICE_ACCOUNT_FILE: str = os.environ.get("FIREBASE_SERVICE_ACCOUNT_FILE", "")
+    ENABLE_ELEVENLABS: bool = get_bool_env("ENABLE_ELEVENLABS", True)
+    ELEVENLABS_API_KEY: str = os.environ.get("ELEVENLABS_API_KEY", "")
+    ELEVENLABS_VOICE_ID: str = os.environ.get("ELEVENLABS_VOICE_ID", "")
+    ELEVENLABS_MODEL_ID: str = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
+    ELEVENLABS_VOICE_ID_EN: str = os.environ.get("ELEVENLABS_VOICE_ID_EN", "")
+    ELEVENLABS_VOICE_ID_HI: str = os.environ.get("ELEVENLABS_VOICE_ID_HI", "")
+    ELEVENLABS_VOICE_ID_ES: str = os.environ.get("ELEVENLABS_VOICE_ID_ES", "")
+    ACADEMY_USE_HF_DATASET: bool = get_bool_env("ACADEMY_USE_HF_DATASET", False)
+    ACADEMY_HF_DATASET_NAME: str = os.environ.get("ACADEMY_HF_DATASET_NAME", "BothBosu/scam-dialogue")
+    ACADEMY_MAX_DATASET_SCENARIOS: int = get_int_env("ACADEMY_MAX_DATASET_SCENARIOS", 80)
+    ACADEMY_DATASET_CACHE_DIR: str = os.environ.get("ACADEMY_DATASET_CACHE_DIR", ".cache/huggingface")
+    ACADEMY_STORE_IMPORTED_SCENARIOS: bool = get_bool_env("ACADEMY_STORE_IMPORTED_SCENARIOS", False)
 
     @property
     def resolved_firebase_credentials_path(self) -> str:

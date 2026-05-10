@@ -7,6 +7,7 @@ import CallHistory from '../components/dashboard/CallHistory'
 import CallDetail from '../components/dashboard/CallDetail'
 import Family from '../components/dashboard/Family'
 import Settings from '../components/dashboard/Settings'
+import Academy from '../components/dashboard/Academy'
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
@@ -25,8 +26,8 @@ function CenteredMessage({ icon: Icon, title, body, action }) {
   )
 }
 
-export default function Dashboard() {
-  const [page, setPage]                 = useState('overview')
+export default function Dashboard({ initialPage = 'overview' }) {
+  const [page, setPage]                 = useState(initialPage)
   const [selectedCall, setSelectedCall] = useState(null)
   const [calls, setCalls]               = useState([])
   const [loading, setLoading]           = useState(true)
@@ -115,6 +116,7 @@ export default function Dashboard() {
   }
 
   const mainContent = () => {
+    if (page === 'academy')  return <Academy />
     if (page === 'family')   return <Family />
     if (page === 'settings') return <Settings />
     return callsContent()
