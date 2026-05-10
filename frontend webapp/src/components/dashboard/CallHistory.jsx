@@ -21,8 +21,9 @@ export default function CallHistory({ calls, onSelectCall }) {
   const [filter, setFilter] = useState('All')
   const [query, setQuery]   = useState('')
 
+  const isScam  = (c) => c.is_scam ?? c.latest_claude_result?.is_scam ?? false
   const visible = calls.filter(c => {
-    const matchFilter = filter === 'All' || (filter === 'Scam' ? c.is_scam : !c.is_scam)
+    const matchFilter = filter === 'All' || (filter === 'Scam' ? isScam(c) : !isScam(c))
     const scamType = c.latest_claude_result?.scam_type || ''
     const matchQuery  = query === '' || (c.phone_number || '').includes(query) || scamType.toLowerCase().includes(query.toLowerCase())
     return matchFilter && matchQuery

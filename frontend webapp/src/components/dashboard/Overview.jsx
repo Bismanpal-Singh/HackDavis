@@ -31,8 +31,9 @@ function Sparkline({ data, color }) {
 }
 
 export default function Overview({ calls, onSelectCall }) {
+  const isScam  = (c) => c.is_scam ?? c.latest_claude_result?.is_scam ?? false
   const total   = calls.length
-  const scams   = calls.filter(c => c.is_scam).length
+  const scams   = calls.filter(isScam).length
   const safe    = total - scams
   const pctSafe = total ? Math.round((safe / total) * 100) : 0
 

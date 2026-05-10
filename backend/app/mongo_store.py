@@ -325,6 +325,7 @@ class MongoStore:
             "risk_level": risk_level,
             "matched_categories": dedupe_phrases(session.matched_categories),
             "flagged_phrases": dedupe_phrases(session.flagged_phrases),
+            "is_scam": bool(session.latest_claude_result and session.latest_claude_result.get("is_scam")),
             "latest_claude_result": session.latest_claude_result,
             "alert_triggered": session.alert_triggered,
             "alert_triggered_at": session.alert_triggered_at,
