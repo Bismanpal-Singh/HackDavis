@@ -10,6 +10,7 @@ import ForFamilies from './components/ForFamilies'
 import CTASection from './components/CTASection'
 import Footer from './components/Footer'
 import AuthPage from './pages/AuthPage'
+import Dashboard from './pages/Dashboard'
 
 function LandingPage() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<AuthPage />} />
             <Route path="/signup" element={<AuthPage />} />
+            <Route path="/dashboard" element={<Dashboard />} />
           </Routes>
         </div>
       </BrowserRouter>
