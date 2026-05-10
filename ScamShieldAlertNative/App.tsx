@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
 import messaging from '@react-native-firebase/messaging';
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +16,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Contacts from 'react-native-contacts';
@@ -25,12 +27,17 @@ import {
 } from 'react-native-safe-area-context';
 
 const TWILIO_NUMBER = '(855) 555-0199';
-const BACKEND_HTTP_URL = 'https://replace-with-your-ngrok-url.ngrok-free.app';
+const BACKEND_HTTP_URL = 'https://merchandise-scope-gets-disks.trycloudflare.com';
+const GOOGLE_WEB_CLIENT_ID = '622151238741-uflrd08u48mkdbicer6204ev4gk5022l.apps.googleusercontent.com';
 const SETUP_COMPLETE_KEY = 'setup_complete';
+const USER_REGISTERED_KEY = 'user_registered';
+const GOOGLE_SUB_KEY = 'google_sub';
+const USER_NAME_KEY = 'user_name';
+const USER_PHONE_KEY = 'user_phone';
 const TWILIO_NUMBER_KEY = 'twilio_number';
 const PUSH_TOKEN_ENDPOINT = `${BACKEND_HTTP_URL}/api/push-token`;
 
-type Screen = 'setup' | 'protected' | 'alert';
+type Screen = 'account' | 'setup' | 'protected' | 'alert';
 type PushStatus =
   | 'unsupported'
   | 'idle'
@@ -48,7 +55,7 @@ const ScamShieldPush = NativeModules.ScamShieldPush as
   | ScamShieldPushModule
   | undefined;
 
-function isScamAlertPayload(data?: {[key: string]: unknown}) {
+function isScamAlertPayload(data?: { [key: string]: unknown }) {
   return data?.type === 'scam_alert';
 }
 
@@ -70,6 +77,16 @@ function collectPhoneNumbers(contacts: Contacts.Contact[]) {
   });
 
   return Array.from(phoneNumbers).sort();
+}
+
+async function assertSuccessfulResponse(response: Response, action: string) {
+  if (response.ok) {
+    return;
+  }
+
+  const responseText = await response.text();
+  const detail = responseText ? ` ${responseText}` : '';
+  throw new Error(`${action} failed with status ${response.status}.${detail}`);
 }
 
 async function requestContactsPermission() {
@@ -108,6 +125,14 @@ async function requestAndroidNotificationPermission() {
 }
 
 function App() {
+  useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: GOOGLE_WEB_CLIENT_ID,
+      offlineAccess: false,
+      profileImageSize: 120,
+    });
+  }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" backgroundColor="#07111f" />
@@ -159,19 +184,24 @@ function ScamShieldApp() {
         return;
       }
 
+      const googleSub = await AsyncStorage.getItem(GOOGLE_SUB_KEY);
+
+      if (!googleSub) {
+        throw new Error('Google setup is required before registering push alerts.');
+      }
+
       const response = await fetch(PUSH_TOKEN_ENDPOINT, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          google_sub: googleSub,
           platform: Platform.OS,
           provider,
           token,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Push token upload failed with status ${response.status}.`);
-      }
+      await assertSuccessfulResponse(response, 'Push token upload');
 
       setPushStatus('registered');
     } catch (error) {
@@ -184,12 +214,27 @@ function ScamShieldApp() {
   useEffect(() => {
     let mounted = true;
 
-    AsyncStorage.getItem(SETUP_COMPLETE_KEY)
-      .then(value => {
-        if (mounted && value === 'true') {
+    Promise.all([
+      AsyncStorage.getItem(USER_REGISTERED_KEY),
+      AsyncStorage.getItem(SETUP_COMPLETE_KEY),
+    ])
+      .then(([userRegistered, setupComplete]) => {
+        if (!mounted) {
+          return;
+        }
+
+        if (userRegistered !== 'true') {
+          setScreen('account');
+          return;
+        }
+
+        if (setupComplete === 'true') {
           setScreen('protected');
           registerPushToken();
+          return;
         }
+
+        setScreen('setup');
       })
       .finally(() => {
         if (mounted) {
@@ -197,7 +242,7 @@ function ScamShieldApp() {
         }
       });
 
-    let pushSubscription: {remove: () => void} | undefined;
+    let pushSubscription: { remove: () => void } | undefined;
 
     if (Platform.OS === 'android') {
       const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
@@ -278,6 +323,10 @@ function ScamShieldApp() {
     );
   }
 
+  if (screen === 'account') {
+    return <AccountScreen onComplete={navigation.goToSetup} />;
+  }
+
   return (
     <SetupScreen
       onReady={() => {
@@ -285,6 +334,162 @@ function ScamShieldApp() {
         registerPushToken();
       }}
     />
+  );
+}
+
+function normalizeDialedPhone(input: string) {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+  return input.trim();
+}
+
+function AccountScreen({ onComplete }: { onComplete: () => void }) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [googleSub, setGoogleSub] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [email, setEmail] = useState('');
+
+  async function signInWithGoogle() {
+    setIsSubmitting(true);
+
+    try {
+      if (Platform.OS === 'android') {
+        await GoogleSignin.hasPlayServices({
+          showPlayServicesUpdateDialog: true,
+        });
+      }
+
+      const response = await GoogleSignin.signIn();
+
+      if (response.type !== 'success') {
+        return;
+      }
+
+      setGoogleSub(response.data.user.id);
+      setDisplayName(response.data.user.name ?? '');
+      setEmail(response.data.user.email);
+    } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : 'Google sign-in failed.';
+      Alert.alert('Sign-in failed', detail);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function registerAccount() {
+    if (!googleSub) {
+      Alert.alert('Google sign-in required', 'Sign in before continuing.');
+      return;
+    }
+
+    if (!displayName.trim() || !phoneNumber.trim()) {
+      Alert.alert('Missing details', 'Enter your name and phone number.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const dialedPhone = normalizeDialedPhone(phoneNumber);
+      const response = await fetch(`${BACKEND_HTTP_URL}/api/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          google_sub: googleSub,
+          dialed_phone: dialedPhone,
+        }),
+      });
+
+      await assertSuccessfulResponse(response, 'Registration');
+
+      await AsyncStorage.setItem(USER_REGISTERED_KEY, 'true');
+      await AsyncStorage.setItem(GOOGLE_SUB_KEY, googleSub);
+      await AsyncStorage.setItem(USER_NAME_KEY, displayName.trim());
+      await AsyncStorage.setItem(USER_PHONE_KEY, dialedPhone);
+      onComplete();
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? error.message
+          : 'Account registration failed.';
+      Alert.alert('Registration failed', detail);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <SafeAreaView style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.setupContent}>
+        <View style={styles.brandRow}>
+          <View style={styles.logoMark}>
+            <Text style={styles.logoText}>S</Text>
+          </View>
+          <Text style={styles.brandText}>ScamShield</Text>
+        </View>
+
+        <Text style={styles.setupTitle}>Create your protected profile.</Text>
+        <Text style={styles.setupSubtitle}>
+          Sign in once and add the phone number that Twilio forwards into
+          ScamShield. Future launches skip this step.
+        </Text>
+
+        <View style={styles.panel}>
+          <Text style={styles.panelLabel}>Google account</Text>
+          {email ? <Text style={styles.panelBody}>{email}</Text> : null}
+          <Pressable
+            disabled={isSubmitting}
+            onPress={signInWithGoogle}
+            style={[styles.secondaryButton, isSubmitting && styles.disabledButton]}>
+            <Text style={styles.secondaryButtonText}>
+              {googleSub ? 'Google connected' : 'Sign in with Google'}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.panel}>
+          <Text style={styles.panelLabel}>Your details</Text>
+          <TextInput
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder="Full name"
+            placeholderTextColor="#6f879a"
+            style={styles.input}
+            autoCapitalize="words"
+          />
+          <TextInput
+            value={phoneNumber}
+            onChangeText={setPhoneNumber}
+            placeholder="Phone number"
+            placeholderTextColor="#6f879a"
+            style={styles.input}
+            keyboardType="phone-pad"
+            textContentType="telephoneNumber"
+          />
+        </View>
+
+        <Pressable
+          disabled={isSubmitting || !googleSub}
+          onPress={registerAccount}
+          style={[
+            styles.primaryButton,
+            (isSubmitting || !googleSub) && styles.disabledButton,
+          ]}>
+          {isSubmitting ? (
+            <ActivityIndicator color="#04101a" />
+          ) : (
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          )}
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -300,7 +505,7 @@ function BootScreen() {
   );
 }
 
-function SetupScreen({onReady}: {onReady: () => void}) {
+function SetupScreen({ onReady }: { onReady: () => void }) {
   const [isImporting, setIsImporting] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [safeListCount, setSafeListCount] = useState<number | null>(null);
@@ -325,16 +530,22 @@ function SetupScreen({onReady}: {onReady: () => void}) {
 
       const contacts = await Contacts.getAllWithoutPhotos();
       const phoneNumbers = collectPhoneNumbers(contacts);
+      const googleSub = await AsyncStorage.getItem(GOOGLE_SUB_KEY);
+
+      if (!googleSub) {
+        throw new Error('Google setup is required before importing contacts.');
+      }
 
       const response = await fetch(`${BACKEND_HTTP_URL}/api/safelist`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({phoneNumbers}),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          google_sub: googleSub,
+          phone_numbers: phoneNumbers,
+        }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Safelist upload failed with status ${response.status}.`);
-      }
+      await assertSuccessfulResponse(response, 'Safelist upload');
 
       await AsyncStorage.setItem(SETUP_COMPLETE_KEY, 'true');
       await AsyncStorage.setItem(TWILIO_NUMBER_KEY, TWILIO_NUMBER);
@@ -541,7 +752,7 @@ function ProtectedScreen({
   );
 }
 
-function AlertScreen({onDone}: {onDone: () => void}) {
+function AlertScreen({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     const timers = [0, 700, 1400].map(delay =>
       setTimeout(() => {
@@ -685,6 +896,16 @@ const styles = StyleSheet.create({
     color: '#dce9f4',
     fontSize: 15,
     lineHeight: 23,
+  },
+  input: {
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#29445e',
+    backgroundColor: '#07111f',
+    color: '#f5fbff',
+    fontSize: 16,
+    paddingHorizontal: 14,
   },
   warningText: {
     color: '#ffc0b2',

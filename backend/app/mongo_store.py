@@ -169,6 +169,59 @@ class MongoStore:
         except PyMongoError as exc:
             logger.error("MONGO_ERROR message=%s", _safe_error_message(exc))
 
+    def update_user_safelist(self, google_sub: str, phone_numbers: list[str]) -> bool:
+        if not self.is_enabled():
+            return False
+        try:
+            result = self.users_collection.update_one(
+                {"google_sub": google_sub},
+                {
+                    "$set": {
+                        "safe_list_phone_numbers": sorted(set(phone_numbers)),
+                        "safe_list_updated_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
+            )
+            logger.info(
+                "USER_SAFELIST_UPDATED google_sub=%s count=%d matched=%d",
+                google_sub,
+                len(set(phone_numbers)),
+                result.matched_count,
+            )
+            return result.matched_count > 0
+        except PyMongoError as exc:
+            logger.error("MONGO_ERROR message=%s", _safe_error_message(exc))
+            return False
+
+    def update_user_push_token(self, google_sub: str, platform: str, provider: str, token: str) -> bool:
+        if not self.is_enabled():
+            return False
+        try:
+            result = self.users_collection.update_one(
+                {"google_sub": google_sub},
+                {
+                    "$set": {
+                        "push_token": token,
+                        "push_platform": platform,
+                        "push_provider": provider,
+                        "push_token_updated_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
+            )
+            logger.info(
+                "USER_PUSH_TOKEN_UPDATED google_sub=%s platform=%s provider=%s matched=%d",
+                google_sub,
+                platform,
+                provider,
+                result.matched_count,
+            )
+            return result.matched_count > 0
+        except PyMongoError as exc:
+            logger.error("MONGO_ERROR message=%s", _safe_error_message(exc))
+            return False
+
     def get_user_by_sub(self, google_sub: str) -> dict | None:
         if not self.is_enabled():
             return None

@@ -13,7 +13,7 @@ logger = logging.getLogger("scamshield")
 
 from app.decision_engine import DecisionEngine, get_risk_level
 from app.detection_pipeline import process_transcript_chunk
-from app.models import ErrorResponse, TranscriptChunk, UserRegisterRequest
+from app.models import ErrorResponse, PushTokenRequest, SafelistRequest, TranscriptChunk, UserRegisterRequest
 from app.mongo_store import mongo_store
 from app.report_builder import build_report, build_report_from_document
 from app.rule_scorer import RuleScorer
@@ -56,6 +56,37 @@ async def register_user(body: UserRegisterRequest) -> dict:
     if not mongo_store.is_enabled():
         raise HTTPException(status_code=503, detail="Database not available.")
     mongo_store.register_user(body.google_sub, body.dialed_phone)
+    return {"success": True}
+
+
+@app.post("/api/safelist")
+async def update_safelist(body: SafelistRequest) -> dict:
+    """Stores imported trusted contact phone numbers on the user's Mongo document."""
+    if not mongo_store.is_enabled():
+        raise HTTPException(status_code=503, detail="Database not available.")
+
+    updated = mongo_store.update_user_safelist(body.google_sub, body.phone_numbers)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not registered. Complete Google setup first.")
+
+    return {"success": True, "count": len(set(body.phone_numbers))}
+
+
+@app.post("/api/push-token")
+async def update_push_token(body: PushTokenRequest) -> dict:
+    """Stores the user's latest FCM/APNs token on their Mongo user document."""
+    if not mongo_store.is_enabled():
+        raise HTTPException(status_code=503, detail="Database not available.")
+
+    updated = mongo_store.update_user_push_token(
+        body.google_sub,
+        body.platform,
+        body.provider,
+        body.token,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not registered. Complete Google setup first.")
+
     return {"success": True}
 
 
