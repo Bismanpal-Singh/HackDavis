@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Clipboard from '@react-native-clipboard/clipboard';
 import messaging from '@react-native-firebase/messaging';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import notifee, { AndroidImportance } from '@notifee/react-native';
+import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -340,10 +340,39 @@ function ScamShieldApp() {
         })
         .catch(() => undefined);
 
+      const unsubscribeNotifeeForeground = notifee.onForegroundEvent(
+        ({ type, detail }) => {
+          if (type !== EventType.PRESS && type !== EventType.ACTION_PRESS) {
+            return;
+          }
+          const data = detail.notification?.data as
+            | { [key: string]: unknown }
+            | undefined;
+          console.log('[ScamShield][notifee press]', data);
+          if (isScamAlertPayload(data)) {
+            setScreen('alert');
+          }
+        },
+      );
+
+      notifee
+        .getInitialNotification()
+        .then(initial => {
+          const data = initial?.notification?.data as
+            | { [key: string]: unknown }
+            | undefined;
+          console.log('[ScamShield][notifee initial]', data);
+          if (mounted && isScamAlertPayload(data)) {
+            setScreen('alert');
+          }
+        })
+        .catch(() => undefined);
+
       pushSubscription = {
         remove: () => {
           unsubscribeForeground();
           unsubscribeOpened();
+          unsubscribeNotifeeForeground();
         },
       };
     } else if (Platform.OS === 'ios' && ScamShieldPush) {

@@ -56,12 +56,10 @@ class PushNotifier:
             message_id = messaging.send(
                 messaging.Message(
                     token=token,
-                    notification=messaging.Notification(
-                        title="SCAM DETECTED",
-                        body="Hang up now",
-                    ),
                     data={
                         "type": "scam_alert",
+                        "title": "SCAM DETECTED",
+                        "body": "Hang up now",
                         "session_id": session.session_id,
                         "score": str(session.current_score),
                         "risk_level": get_risk_level(session.current_score),
@@ -69,10 +67,6 @@ class PushNotifier:
                     },
                     android=messaging.AndroidConfig(
                         priority="high",
-                        notification=messaging.AndroidNotification(
-                            priority="max",
-                            sound="default",
-                        ),
                     ),
                 )
             )
@@ -119,8 +113,9 @@ class PushNotifier:
             return False
 
     def _build_credential(self) -> Any | None:
-        if settings.FIREBASE_SERVICE_ACCOUNT_FILE:
-            return credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_FILE)
+        path = settings.resolved_firebase_credentials_path
+        if path:
+            return credentials.Certificate(path)
 
         return None
 

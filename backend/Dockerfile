@@ -5,14 +5,18 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
-COPY scripts ./scripts
-COPY README.md ./
-COPY .env.example ./
+COPY backend/app ./app
+COPY backend/scripts ./scripts
+COPY backend/README.md ./
+COPY backend/.env.example ./
+
+# Firebase Admin service account JSON (keep this path in sync with backend/firebase.json).
+# Build from repo root: docker build -f backend/Dockerfile -t scamshield-backend .
+COPY backend/firebase.json /app/secrets/firebase-service-account.json
 
 EXPOSE 8000
 

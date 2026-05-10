@@ -121,19 +121,22 @@ Endpoints:
 
 ## Docker
 
-Build the backend image from this `backend/` directory:
+Build from the **repository root** so the Dockerfile can copy `backend/firebase.json` (your Firebase Admin service account JSON) into the image at `/app/secrets/firebase-service-account.json`. Without that file, the build fails at the `COPY backend/firebase.json` step.
 
 ```bash
-docker build -t scamshield-backend .
+cd /path/to/HackDavis
+docker build -f backend/Dockerfile -t scamshield-backend .
 ```
 
-Run locally with your `.env` file mounted as environment variables:
+Run with your `backend/.env` (any `FIREBASE_SERVICE_ACCOUNT_FILE` host path is ignored at runtime if the baked-in secret file exists):
 
 ```bash
-docker run --rm --env-file .env -p 8000:8000 scamshield-backend
+docker run --rm --env-file backend/.env -p 8000:8000 scamshield-backend
 ```
 
 Docker must be running locally for `docker build` and `docker run`. On macOS, start Docker Desktop first.
+
+**Security:** The service account JSON ends up in an image layer. That is acceptable for many hackathon or private-registry setups; for production, prefer mounting the JSON at run time instead of `COPY`, and avoid pushing that image to a public registry.
 
 For a safe local demo, make sure `.env` contains:
 

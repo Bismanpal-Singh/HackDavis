@@ -76,6 +76,40 @@ class Settings:
     FIREBASE_SERVICE_ACCOUNT_FILE: str = os.environ.get("FIREBASE_SERVICE_ACCOUNT_FILE", "")
 
     @property
+    def resolved_firebase_credentials_path(self) -> str:
+        """Path to Firebase service account JSON if it exists on disk.
+
+        Tries: absolute env path; paths relative to backend root and cwd; `backend/firebase.json`;
+        then the path baked into the Docker image at build time.
+        """
+        raw = (self.FIREBASE_SERVICE_ACCOUNT_FILE or "").strip()
+        candidates: list[Path] = []
+        seen: set[Path] = set()
+
+        def add(path: Path) -> None:
+            try:
+                resolved = path.resolve()
+            except (OSError, RuntimeError):
+                return
+            if resolved not in seen:
+                seen.add(resolved)
+                candidates.append(resolved)
+
+        if raw:
+            first = Path(raw)
+            if first.is_absolute():
+                add(first)
+            else:
+                add(BACKEND_ROOT / raw)
+                add(Path.cwd() / raw)
+        add(BACKEND_ROOT / "firebase.json")
+        add(Path("/app/secrets/firebase-service-account.json"))
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return ""
+
+    @property
     def CLAUDE_CONFIGURED(self) -> bool:
         return bool(self.ANTHROPIC_API_KEY)
 
@@ -93,7 +127,7 @@ class Settings:
 
     @property
     def FIREBASE_CONFIGURED(self) -> bool:
-        return bool(self.FIREBASE_SERVICE_ACCOUNT_FILE)
+        return bool(self.resolved_firebase_credentials_path)
 
 
 settings = Settings()
