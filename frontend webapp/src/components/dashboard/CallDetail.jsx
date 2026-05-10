@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { X, ExternalLink, Share2, Clock, Phone, Brain, ShieldCheck, ShieldAlert, Calendar } from 'lucide-react'
+import { X, ExternalLink, Share2, Download, Clock, Phone, Brain, ShieldCheck, ShieldAlert, Calendar } from 'lucide-react'
 import RiskBadge from './RiskBadge'
+import { downloadCallReport } from '../../utils/reportGenerator'
 
 const CATEGORY_META = {
   payment_demand:        { label: 'Payment Demand',  desc: 'Caller requested money or a financial transfer' },
@@ -284,11 +285,18 @@ export default function CallDetail({ call, onClose }) {
           </button>
         )}
         <button
+          onClick={() => downloadCallReport(call)}
+          className="flex items-center gap-2 bg-stone-800 hover:bg-stone-900 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-colors"
+        >
+          <Download size={13} />
+          Download Report
+        </button>
+        <button
           onClick={() => navigator.clipboard?.writeText(window.location.href)}
           className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-600 text-xs font-bold px-5 py-2.5 rounded-xl transition-colors"
         >
           <Share2 size={13} />
-          Share Report
+          Share
         </button>
       </div>
     </motion.div>
