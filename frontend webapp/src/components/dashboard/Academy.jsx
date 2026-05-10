@@ -140,6 +140,7 @@ export default function Academy() {
 
   const currentAudioRef = useRef(null)
   const currentAudioUrlRef = useRef(null)
+  const currentAudioTypeRef = useRef(null)
 
   const redFlags = useMemo(() => scenarioDetail?.red_flags || [], [scenarioDetail])
   const englishOnly = useMemo(() => isEnglishOnlyScenario(scenarioDetail), [scenarioDetail])
@@ -162,7 +163,7 @@ export default function Academy() {
   }, [])
 
   const stopCurrentAudio = useCallback(() => {
-    const previousType = currentAudioType
+    const previousType = currentAudioTypeRef.current
     if (currentAudioRef.current) {
       currentAudioRef.current.pause()
       currentAudioRef.current.currentTime = 0
@@ -172,6 +173,7 @@ export default function Academy() {
       URL.revokeObjectURL(currentAudioUrlRef.current)
       currentAudioUrlRef.current = null
     }
+    currentAudioTypeRef.current = null
     setCurrentAudioType(null)
     setIsAudioLoading(false)
     setIsAudioPlaying(false)
@@ -179,7 +181,7 @@ export default function Academy() {
     if (previousType) {
       console.info('ACADEMY_AUDIO_STOP', { previousType })
     }
-  }, [currentAudioType])
+  }, [])
 
   const fetchStats = useCallback(async () => {
     setLoadingStats(true)
@@ -228,10 +230,8 @@ export default function Academy() {
     }
   }, [])
 
-  useEffect(() => {
-    return () => {
-      stopCurrentAudio()
-    }
+  useEffect(() => () => {
+    stopCurrentAudio()
   }, [stopCurrentAudio])
 
   useEffect(() => {
@@ -389,6 +389,7 @@ export default function Academy() {
       const audio = new Audio(audioUrl)
       currentAudioUrlRef.current = audioUrl
       currentAudioRef.current = audio
+      currentAudioTypeRef.current = type
       setCurrentAudioType(type)
       setIsAudioPaused(false)
 
